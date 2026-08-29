@@ -6,8 +6,11 @@
     "types": ["node"],
     "skipLibCheck": true,
 
-    /* Bundler mode */
-    "module": "nodenext",
+    /* Vite bundles this config with esbuild, which resolves extensionless
+       imports — so it must share the api/ resolution rules rather than
+       nodenext, which would demand .ts specifiers Vercel cannot emit. */
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
@@ -19,5 +22,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["vite.config.ts", "api", "scripts"]
+  "include": ["vite.config.ts"]
 }

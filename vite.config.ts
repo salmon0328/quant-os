@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import { fetchCalendars, requestFromQuery } from './src/lib/icsProxy.ts';
+import { fetchCalendars, requestFromQuery } from './api/_lib/icsProxy';
 
 /**
  * Mirrors the Vercel /api/calendar function during `npm run dev` so the

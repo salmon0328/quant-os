@@ -1,4 +1,4 @@
-import { parseIcs, type IcsOptions, type ParsedAllDay, type ParsedCommitment } from './ics.ts';
+import { parseIcs, type IcsOptions, type ParsedAllDay, type ParsedCommitment } from './ics.js';
 
 /**
  * Server-side fetch of a Google Calendar iCal feed.

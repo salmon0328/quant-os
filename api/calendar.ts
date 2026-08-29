@@ -1,4 +1,9 @@
-import { fetchCalendars, requestFromQuery } from '../src/lib/icsProxy.ts';
+// Vercel only compiles files under api/, so the shared parser lives in
+// api/_lib (underscore-prefixed files are dependencies, not routes).
+// Specifiers carry a .js extension: TypeScript maps them to the .ts sources
+// for checking, while the emitted JS keeps an extension Node's ESM resolver
+// accepts. An extensionless specifier type-checks but crashes at runtime.
+import { fetchCalendars, requestFromQuery } from './_lib/icsProxy.js';
 
 interface VercelLikeRequest {
   method?: string;
