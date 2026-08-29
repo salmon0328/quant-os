@@ -305,6 +305,10 @@ export interface Deadline {
 // Daily rhythm: sleep window, fixed commitments, task budget
 // ---------------------------------------------------------------------------
 
+// Imported late to avoid a cycle: cadences.ts imports types from this file,
+// and it is the single source of truth for which weekdays each task lands on.
+import { defaultCadences } from '../data/cadence.js';
+
 export interface ScheduleSettings {
   /** Earliest you're willing to be up — "HH:MM". */
   wakeTime: string;
@@ -319,6 +323,11 @@ export interface ScheduleSettings {
   campusDays: number[];
   /** Google Calendar iCal feeds (secret or public address). */
   icsFeeds: CalendarFeed[];
+  /**
+   * Weekday list per task kind (0=Sun … 6=Sat). Tasks land on these days
+   * deterministically instead of being drawn at random each morning.
+   */
+  cadences: Record<string, number[]>;
   /** Assign concrete start times from your free slots. */
   autoSchedule: boolean;
   /** Minutes offset from UTC for your calendar (Singapore = 480). */
@@ -340,6 +349,7 @@ export const DEFAULT_SCHEDULE: ScheduleSettings = {
   maxOptionalTasks: 1,
   campusDays: [1, 2, 3, 4, 5],
   icsFeeds: [],
+  cadences: defaultCadences(),
   autoSchedule: true,
   tzOffsetMinutes: 480,
 };

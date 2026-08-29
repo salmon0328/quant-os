@@ -150,7 +150,10 @@ export function assignTimes(tasks: Task[], slots: TimeSlot[]): Task[] {
   if (slots.length === 0) return tasks.map((t) => ({ ...t, startTime: undefined }));
 
   const state: SlotState[] = slots.map((s) => ({ ...s, cursor: 0 }));
-  const ranked = [...tasks].sort((a, b) => priorityRank(b) - priorityRank(a));
+  // Placement uses the caller's order, which the generator sets by cadence
+  // rank. Sorting by tier or duration here would let a long optional task
+  // claim the morning and push a short daily habit to the afternoon.
+  const ranked = tasks;
   const placed = new Map<string, string>();
 
   for (const t of ranked) {
@@ -173,10 +176,6 @@ export function assignTimes(tasks: Task[], slots: TimeSlot[]): Task[] {
   }
 
   return tasks.map((t) => ({ ...t, startTime: placed.get(t.id) }));
-}
-
-function priorityRank(t: Task): number {
-  return (t.priority === 'core' ? 100 : 0) + t.minutes / 100;
 }
 
 /** End time in wall-clock HH:MM. */

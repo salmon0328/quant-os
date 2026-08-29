@@ -5,11 +5,12 @@ import { WEEKDAY_NAMES, today } from '../lib/date';
 import { uid } from '../lib/id';
 import type { CalendarFeed, FixedBlock, TaskLocation } from '../models';
 import { freeSlots, blocksForDate, isCampusDay } from '../engine/scheduler';
+import { RhythmGrid } from '../components/RhythmGrid';
 
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export default function Settings() {
-  const { state, updateSchedule, syncCalendar, addFixedBlock, updateFixedBlock, removeFixedBlock } = useApp();
+  const { state, updateSchedule, setCadence, syncCalendar, addFixedBlock, updateFixedBlock, removeFixedBlock } = useApp();
   const s = state.schedule;
   const [syncing, setSyncing] = useState(false);
   const [msg, setMsg] = useState<{ tone: 'ok' | 'warn' | 'err'; text: string } | null>(null);
@@ -113,6 +114,22 @@ export default function Settings() {
         <p className="text-xs text-slate-400">
           Core tasks are the ones that count. Optional tasks are bonus — skipping them is not a failure.
         </p>
+      </Card>
+
+      {/* ---------------------------------------------------------- rhythm */}
+      <Card>
+        <SectionTitle right={
+          <span className="text-xs text-slate-400">
+            {Object.values(s.cadences ?? {}).flat().length} slots / week
+          </span>
+        }>
+          Weekly rhythm
+        </SectionTitle>
+        <p className="mb-3 text-xs text-slate-400">
+          Each task lands on the same days every week, so the plan is predictable instead of
+          random. Market news runs daily; the rest fills around it.
+        </p>
+        <RhythmGrid schedule={s} onChange={setCadence} />
       </Card>
 
       {/* ------------------------------------------------------- on campus */}

@@ -185,6 +185,7 @@ interface Ctx {
   reviewKnowledge: (id: string, remembered: boolean) => void;
   // v2: rhythm
   updateSchedule: (p: Partial<ScheduleSettings>) => void;
+  setCadence: (kindId: string, days: number[]) => void;
   syncCalendar: () => Promise<CalendarSyncResult>;
   addFixedBlock: (b: FixedBlock) => void;
   updateFixedBlock: (b: FixedBlock) => void;
@@ -430,6 +431,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return [...byDate.entries()].flatMap(([date, tasks]) => scheduleExisting(s, date, tasks));
   };
 
+  /** Change which weekdays a task kind lands on, then re-place today's tasks. */
+  const setCadence = (kindId: string, days: number[]) => {
+    const cadences = { ...(state.schedule?.cadences ?? {}), [kindId]: [...days].sort() };
+    const schedule = { ...(state.schedule ?? DEFAULT_SCHEDULE), cadences };
+    patch({ schedule, tasks: rescheduleAll({ ...state, schedule }) });
+  };
+
   const syncCalendar = async (): Promise<CalendarSyncResult> => {
     const feeds = (state.schedule?.icsFeeds ?? []).filter((f) => f.url.trim());
     if (feeds.length === 0) return { ok: false, error: 'Add at least one calendar link first.' };
@@ -546,7 +554,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       state, patch, reset, importState, syncEnabled: isSupabaseConfigured, syncStatus,
       energyFor, setEnergy, ensureTasksForDate, regenerateTasks, rescheduleDay,
       toggleTask, addTask, updateTask, deleteTask, rescheduleMissed, reviewKnowledge,
-      updateSchedule, syncCalendar, addFixedBlock, updateFixedBlock, removeFixedBlock,
+      updateSchedule, setCadence, syncCalendar, addFixedBlock, updateFixedBlock, removeFixedBlock,
       addFeedItem, setFeedStatus, removeFeedItem,
       setDeckSize, reviewCard, logDrill,
       addInsight, updateInsight, removeInsight,
