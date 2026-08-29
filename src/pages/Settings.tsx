@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppState';
 import { Card, SectionTitle, Field, Chip, EmptyState } from '../components/ui';
-import { WEEKDAY_NAMES } from '../lib/date';
+import { WEEKDAY_NAMES, today } from '../lib/date';
 import { uid } from '../lib/id';
 import type { FixedBlock, TaskLocation } from '../models';
 import { freeSlots, blocksForDate, isCampusDay } from '../engine/scheduler';
-import { today } from '../lib/date';
 
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -205,7 +204,18 @@ export default function Settings() {
       </Card>
 
       {/* ------------------------------------------------------------ edit */}
-      {editing && <BlockModal block={editing} onClose={() => setEditing(null)} onSave={(b) => { b.id && state.fixedBlocks.some((x) => x.id === b.id) ? updateFixedBlock(b) : addFixedBlock(b); setEditing(null); }} />}
+      {editing && (
+        <BlockModal
+          block={editing}
+          onClose={() => setEditing(null)}
+          onSave={(b) => {
+            const exists = state.fixedBlocks.some((x) => x.id === b.id);
+            if (exists) updateFixedBlock(b);
+            else addFixedBlock(b);
+            setEditing(null);
+          }}
+        />
+      )}
     </div>
   );
 }
