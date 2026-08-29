@@ -3,7 +3,7 @@ import { useApp } from '../store/AppState';
 import { Card, SectionTitle, Field, Chip, EmptyState } from '../components/ui';
 import { WEEKDAY_NAMES, today } from '../lib/date';
 import { uid } from '../lib/id';
-import type { FixedBlock, TaskLocation } from '../models';
+import type { CalendarFeed, FixedBlock, TaskLocation } from '../models';
 import { freeSlots, blocksForDate, isCampusDay } from '../engine/scheduler';
 
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -11,9 +11,9 @@ const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export default function Settings() {
   const { state, updateSchedule, syncCalendar, addFixedBlock, updateFixedBlock, removeFixedBlock } = useApp();
   const s = state.schedule;
-  const [icsInput, setIcsInput] = useState(s.icsUrl ?? '');
   const [syncing, setSyncing] = useState(false);
-  const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
+  const [msg, setMsg] = useState<{ tone: 'ok' | 'warn' | 'err'; text: string } | null>(null);
+  const [allDay, setAllDay] = useState<{ title: string; start: string; end: string }[]>([]);
   const [editing, setEditing] = useState<FixedBlock | null>(null);
 
   const preview = freeSlots(state.fixedBlocks, s, today());
@@ -24,17 +24,21 @@ export default function Settings() {
     setMsg(null);
     const res = await syncCalendar();
     setSyncing(false);
-    setMsg(
-      res.ok
-        ? { tone: 'ok', text: `Imported ${res.imported ?? 0} recurring commitments.` }
-        : { tone: 'err', text: res.error ?? 'Sync failed.' }
-    );
+    if (!res.ok) {
+      setMsg({ tone: 'err', text: res.error ?? 'Sync failed.' });
+    } else if (res.failed) {
+      setMsg({ tone: 'warn', text: `Imported ${res.imported ?? 0} commitments, but ${res.error ?? ''}` });
+    } else {
+      setMsg({ tone: 'ok', text: `Imported ${res.imported ?? 0} recurring commitments from ${s.icsFeeds.length} calendar(s).` });
+    }
+    setAllDay(res.allDay ?? []);
   };
 
-  const saveIcs = () => {
-    updateSchedule({ icsUrl: icsInput.trim() || undefined });
-    setMsg({ tone: 'ok', text: 'Link saved. Now press “Import calendar”.' });
-  };
+  const setFeeds = (feeds: CalendarFeed[]) => updateSchedule({ icsFeeds: feeds });
+  const addFeed = () => setFeeds([...s.icsFeeds, { id: uid('feed-'), label: '', url: '' }]);
+  const updateFeed = (id: string, patch: Partial<CalendarFeed>) =>
+    setFeeds(s.icsFeeds.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+  const removeFeed = (id: string) => setFeeds(s.icsFeeds.filter((f) => f.id !== id));
 
   const toggleDay = (d: number) => {
     const next = s.campusDays.includes(d)
@@ -122,34 +126,82 @@ export default function Settings() {
       {/* -------------------------------------------------------- calendar */}
       <Card>
         <SectionTitle right={<span className="text-xs text-slate-400">{icsCount} imported · {manualCount} manual</span>}>
-          Google Calendar
+          Google Calendar ({s.icsFeeds.length} subscribed)
         </SectionTitle>
         <ol className="mb-3 list-decimal space-y-1 pl-5 text-xs text-slate-500 dark:text-slate-400">
-          <li>Open <b>Google Calendar → Settings → [your calendar] → Integrate calendar</b>.</li>
-          <li>Copy <b>“Secret address in iCal format”</b>.</li>
-          <li>Paste it below and press Import.</li>
+          <li>Open <b>Google Calendar → Settings → [each calendar] → Integrate calendar</b>.</li>
+          <li>Copy the <b>“Secret address in iCal format”</b> (or the public one).</li>
+          <li>Add one row per calendar below, then press Import.</li>
         </ol>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <input
-            className="input flex-1 font-mono text-xs"
-            placeholder="https://calendar.google.com/calendar/ical/…/basic.ics"
-            value={icsInput}
-            onChange={(e) => setIcsInput(e.target.value)}
-          />
-          <div className="flex gap-2">
-            <button className="btn-ghost" onClick={saveIcs}>Save link</button>
-            <button className="btn-primary" disabled={syncing || !icsInput.trim()} onClick={runSync}>
-              {syncing ? 'Importing…' : 'Import calendar'}
-            </button>
-          </div>
+
+        <div className="space-y-2">
+          {s.icsFeeds.length === 0 && (
+            <p className="text-xs text-slate-400">No calendars yet — add your first one.</p>
+          )}
+          {s.icsFeeds.map((f) => (
+            <div key={f.id} className="flex flex-col gap-2 sm:flex-row">
+              <input
+                className="input sm:w-40"
+                placeholder="Label (e.g. Personal)"
+                value={f.label}
+                onChange={(e) => updateFeed(f.id, { label: e.target.value })}
+              />
+              <input
+                className="input flex-1 font-mono text-xs"
+                placeholder="https://calendar.google.com/calendar/ical/…/basic.ics"
+                value={f.url}
+                onChange={(e) => updateFeed(f.id, { url: e.target.value })}
+              />
+              <button className="btn-ghost text-red-500" onClick={() => removeFeed(f.id)}>✕</button>
+            </div>
+          ))}
         </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button className="btn-ghost" onClick={addFeed}>+ Add calendar</button>
+          <button
+            className="btn-primary ml-auto"
+            disabled={syncing || s.icsFeeds.filter((f) => f.url.trim()).length === 0}
+            onClick={runSync}
+          >
+            {syncing ? 'Importing…' : 'Import calendars'}
+          </button>
+        </div>
+
         {msg && (
-          <div className={`mt-2 rounded-md p-2 text-xs ${msg.tone === 'ok' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300'}`}>
+          <div className={`mt-2 rounded-md p-2 text-xs ${
+            msg.tone === 'ok'
+              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+              : msg.tone === 'warn'
+                ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
+                : 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300'
+          }`}>
             {msg.text}
           </div>
         )}
+        {allDay.length > 0 && (
+          <div className="mt-3 rounded-md border border-slate-200 p-2.5 dark:border-slate-700">
+            <div className="label mb-1.5">
+              {allDay.length} all-day event(s) — shown, not blocking time
+            </div>
+            <p className="mb-2 text-[11px] text-slate-400">
+              These have no start/end time, so they can't be treated as busy. They're listed here so you know they exist (holidays, exam periods). Block the day manually if one of them is a real commitment.
+            </p>
+            <div className="max-h-40 space-y-1 overflow-y-auto">
+              {allDay.slice(0, 20).map((a, i) => (
+                <div key={`${a.title}-${i}`} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="truncate text-slate-600 dark:text-slate-300">{a.title}</span>
+                  <span className="shrink-0 text-slate-400">
+                    {a.start === a.end ? a.start : `${a.start} → ${a.end}`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <p className="mt-2 text-[11px] text-slate-400">
-          Read-only, and kept on the server: the browser can't fetch Google's calendar directly, so the app asks its own endpoint to do it. Only <code className="font-mono">calendar.google.com</code> feeds are accepted.
+          Read-only, and fetched on the server: the browser can't reach Google's calendar directly, so the app asks its own endpoint to do it. Only <code className="font-mono">calendar.google.com</code> feeds are accepted. Multiple calendars are merged, and identical events across feeds are de-duplicated.
         </p>
       </Card>
 

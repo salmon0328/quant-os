@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
-import { fetchCalendar, requestFromQuery } from './src/lib/icsProxy.ts';
+import { fetchCalendars, requestFromQuery } from './src/lib/icsProxy.ts';
 
 /**
  * Mirrors the Vercel /api/calendar function during `npm run dev` so the
@@ -9,8 +9,15 @@ import { fetchCalendar, requestFromQuery } from './src/lib/icsProxy.ts';
 function calendarApi(): Plugin {
   const handler = async (reqUrl: string, res: { statusCode: number; setHeader(k: string, v: string): void; end(b: string): void }) => {
     const parsed = new URL(reqUrl, 'http://localhost');
-    const query = Object.fromEntries(parsed.searchParams.entries());
-    const result = await fetchCalendar(requestFromQuery(query));
+    // Preserve repeated ?url= params — the dev middleware must behave like the
+    // serverless route, which receives them as an array.
+    const query: Record<string, string | string[]> = {};
+    parsed.searchParams.forEach((value, key) => {
+      const existing = query[key];
+      if (existing === undefined) query[key] = value;
+      else query[key] = Array.isArray(existing) ? [...existing, value] : [existing, value];
+    });
+    const result = await fetchCalendars(requestFromQuery(query));
     res.statusCode = result.ok ? 200 : 400;
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Cache-Control', 'no-store');

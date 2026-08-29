@@ -26,6 +26,22 @@ export interface ParsedCommitment {
   occurrences: number;
 }
 
+/**
+ * An all-day or multi-day event. These must NOT block time — an all-day event
+ * gives no start/end, so blocking with it would wipe out the whole day. They
+ * are surfaced to the user instead, so they aren't silently lost.
+ */
+export interface ParsedAllDay {
+  title: string;
+  start: string; // yyyy-mm-dd
+  end: string; // yyyy-mm-dd (exclusive)
+}
+
+export interface ParseResult {
+  commitments: ParsedCommitment[];
+  allDay: ParsedAllDay[];
+}
+
 const DAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 const MS_DAY = 86400000;
 
@@ -212,11 +228,12 @@ function matches(date: Date, rule: RRule, origin: Date): boolean {
 
 // ----------------------------------------------------------------- public API
 
-export function parseIcs(text: string, opts: IcsOptions): ParsedCommitment[] {
+export function parseIcs(text: string, opts: IcsOptions): ParseResult {
   const events = extractEvents(unfold(text));
   const winStart = new Date(`${opts.windowStart}T00:00:00Z`);
   const winEnd = new Date(`${opts.windowEnd}T23:59:59Z`);
   const expanded = new Map<string, ParsedCommitment & { dates: Set<string> }>();
+  const allDay: ParsedAllDay[] = [];
 
   for (const ev of events) {
     const origin = parseIcsDate(ev.start, opts.tzOffsetMinutes);
@@ -225,7 +242,15 @@ export function parseIcs(text: string, opts: IcsOptions): ParsedCommitment[] {
     if (!endDt) continue;
 
     const durationMs = Math.max(endDt.getTime() - origin.getTime(), 15 * 60000);
-    if (ev.allDay || durationMs >= 22 * 3600000) continue; // skip all-day / multi-day
+    if (ev.allDay || durationMs >= 22 * 3600000) {
+      // Record it rather than dropping it — the user still needs to see it.
+      const startISO = iso(origin);
+      const endISO = iso(new Date(endDt.getTime() - 1));
+      if (endISO >= opts.windowStart && startISO <= opts.windowEnd) {
+        allDay.push({ title: ev.summary, start: startISO, end: endISO });
+      }
+      continue;
+    }
 
     const rule = ev.rrule ? parseRRule(ev.rrule, opts.tzOffsetMinutes) : null;
     const exdates = new Set(ev.exdates.map((x) => x.slice(0, 8)));
@@ -264,10 +289,28 @@ export function parseIcs(text: string, opts: IcsOptions): ParsedCommitment[] {
     }
   }
 
-  return [...expanded.values()].map((e) => {
+  const commitments = [...expanded.values()].map((e) => {
     const days = [...new Set([...e.dates].map((s) => new Date(`${s}T00:00:00Z`).getUTCDay()))].sort();
     return { uid: e.uid, title: e.title, start: e.start, end: e.end, days, occurrences: e.occurrences };
   });
+
+  // Collapse repeated all-day events so a 277-event holiday calendar stays readable.
+  const allDaySeen = new Map<string, ParsedAllDay & { count: number }>();
+  for (const a of allDay) {
+    const prev = allDaySeen.get(a.title);
+    if (prev) {
+      prev.count += 1;
+      if (a.start < prev.start) prev.start = a.start;
+      if (a.end > prev.end) prev.end = a.end;
+    } else {
+      allDaySeen.set(a.title, { ...a, count: 1 });
+    }
+  }
+
+  return {
+    commitments,
+    allDay: [...allDaySeen.values()].sort((a, b) => a.start.localeCompare(b.start)),
+  };
 }
 
 /** Shape returned by /api/calendar. */

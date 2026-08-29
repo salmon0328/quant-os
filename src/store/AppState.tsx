@@ -97,7 +97,7 @@ function hydrate(parsed: Partial<AppState>): AppState {
     resources: [...mergedResources, ...extraResources],
     projects: [...mergedProjects, ...extraProjects],
     // v2 fields tolerate older payloads.
-    schedule: { ...base.schedule, ...(parsed.schedule ?? {}) },
+    schedule: migrateSchedule({ ...base.schedule, ...(parsed.schedule ?? {}) }),
     fixedBlocks: parsed.fixedBlocks ?? base.fixedBlocks,
     feed: parsed.feed ?? base.feed,
     cardProgress: parsed.cardProgress ?? base.cardProgress,
@@ -106,6 +106,20 @@ function hydrate(parsed: Partial<AppState>): AppState {
     insights: parsed.insights ?? base.insights,
     seedVersion: base.seedVersion,
   } as AppState;
+}
+
+/**
+ * Older builds stored a single `icsUrl`. Lift it into the feeds list so an
+ * existing local/remote state keeps working after the upgrade.
+ */
+function migrateSchedule(schedule: ScheduleSettings): ScheduleSettings {
+  if (schedule.icsFeeds?.length) return schedule;
+  const legacy = (schedule as ScheduleSettings & { icsUrl?: string }).icsUrl?.trim();
+  const { icsUrl: _dropped, ...rest } = schedule as ScheduleSettings & { icsUrl?: string };
+  return {
+    ...rest,
+    icsFeeds: legacy ? [{ id: 'feed-legacy', label: 'Calendar', url: legacy }] : [],
+  } as ScheduleSettings;
 }
 
 function loadState(): AppState {
@@ -137,6 +151,10 @@ export interface CalendarSyncResult {
   ok: boolean;
   error?: string;
   imported?: number;
+  /** How many of the subscribed feeds failed (others still imported). */
+  failed?: number;
+  /** All-day events — shown to the user, never used to block time. */
+  allDay?: { title: string; start: string; end: string }[];
 }
 
 interface Ctx {
@@ -407,19 +425,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const syncCalendar = async (): Promise<CalendarSyncResult> => {
-    const url = state.schedule?.icsUrl?.trim();
-    if (!url) return { ok: false, error: 'Paste your calendar’s secret iCal link first.' };
+    const feeds = (state.schedule?.icsFeeds ?? []).filter((f) => f.url.trim());
+    if (feeds.length === 0) return { ok: false, error: 'Add at least one calendar link first.' };
     const from = today();
     const to = addDays(from, 42);
     const tz = state.schedule?.tzOffsetMinutes ?? 480;
     try {
-      const res = await fetch(
-        `/api/calendar?url=${encodeURIComponent(url)}&from=${from}&to=${to}&tz=${tz}`
-      );
+      const qs = feeds.map((f) => `url=${encodeURIComponent(f.url.trim())}`).join('&');
+      const res = await fetch(`/api/calendar?${qs}&from=${from}&to=${to}&tz=${tz}`);
       const data = (await res.json()) as {
         ok: boolean;
         error?: string;
+        feeds?: { url: string; ok: boolean; error?: string }[];
         events?: { uid: string; title: string; start: string; end: string; days: number[] }[];
+        allDay?: { title: string; start: string; end: string }[];
       };
       if (!data.ok) return { ok: false, error: data.error ?? 'Calendar sync failed.' };
 
@@ -434,8 +453,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         icsUid: e.uid,
       }));
       const manual = (state.fixedBlocks ?? []).filter((b) => b.source !== 'ics');
-      patch({ fixedBlocks: [...manual, ...imported], tasks: rescheduleAll({ ...state, fixedBlocks: [...manual, ...imported] }) });
-      return { ok: true, imported: imported.length };
+      const next = { ...state, fixedBlocks: [...manual, ...imported] };
+      patch({ fixedBlocks: next.fixedBlocks, tasks: rescheduleAll(next) });
+
+      const failed = (data.feeds ?? []).filter((f) => !f.ok);
+      return {
+        ok: true,
+        imported: imported.length,
+        failed: failed.length,
+        allDay: data.allDay ?? [],
+        error: failed.length
+          ? `${failed.length} of ${feeds.length} calendars failed: ${failed[0].error ?? 'unknown error'}`
+          : undefined,
+      };
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : 'Calendar sync failed.' };
     }

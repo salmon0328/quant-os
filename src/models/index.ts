@@ -317,12 +317,19 @@ export interface ScheduleSettings {
   maxOptionalTasks: number;
   /** Days you're physically on campus (0=Sun … 6=Sat) — gates terminal tasks. */
   campusDays: number[];
-  /** Google Calendar "secret address in iCal format". */
-  icsUrl?: string;
+  /** Google Calendar iCal feeds (secret or public address). */
+  icsFeeds: CalendarFeed[];
   /** Assign concrete start times from your free slots. */
   autoSchedule: boolean;
   /** Minutes offset from UTC for your calendar (Singapore = 480). */
   tzOffsetMinutes: number;
+}
+
+/** One subscribed calendar — you can have personal, school and work feeds. */
+export interface CalendarFeed {
+  id: string;
+  label: string;
+  url: string;
 }
 
 export const DEFAULT_SCHEDULE: ScheduleSettings = {
@@ -332,7 +339,7 @@ export const DEFAULT_SCHEDULE: ScheduleSettings = {
   maxCoreTasks: 2,
   maxOptionalTasks: 1,
   campusDays: [1, 2, 3, 4, 5],
-  icsUrl: undefined,
+  icsFeeds: [],
   autoSchedule: true,
   tzOffsetMinutes: 480,
 };

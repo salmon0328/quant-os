@@ -1,4 +1,4 @@
-import { fetchCalendar, requestFromQuery } from '../src/lib/icsProxy.ts';
+import { fetchCalendars, requestFromQuery } from '../src/lib/icsProxy.ts';
 
 interface VercelLikeRequest {
   method?: string;
@@ -13,9 +13,11 @@ interface VercelLikeResponse {
 }
 
 /**
- * GET /api/calendar?url=<secret ical url>&from=YYYY-MM-DD&to=YYYY-MM-DD&tz=<offset min>
+ * GET /api/calendar?url=<ical url>&url=<another>&from=YYYY-MM-DD&to=YYYY-MM-DD&tz=<offset min>
  *
- * Deployed by Vercel automatically from the /api directory.
+ * Accepts several `url` params (one per subscribed calendar) and returns both a
+ * merged event list and the per-feed status, so one broken feed is reported
+ * without losing the others. Deployed by Vercel from the /api directory.
  */
 export default async function handler(req: VercelLikeRequest, res: VercelLikeResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -27,6 +29,6 @@ export default async function handler(req: VercelLikeRequest, res: VercelLikeRes
     return;
   }
 
-  const result = await fetchCalendar(requestFromQuery(req.query ?? {}));
+  const result = await fetchCalendars(requestFromQuery(req.query ?? {}));
   res.status(result.ok ? 200 : 400).json(result);
 }
