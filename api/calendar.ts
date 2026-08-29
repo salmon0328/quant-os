@@ -1,4 +1,4 @@
-import { fetchCalendar, requestFromQuery } from '../src/lib/icsProxy';
+import { fetchCalendar, requestFromQuery } from '../src/lib/icsProxy.ts';
 
 interface VercelLikeRequest {
   method?: string;
