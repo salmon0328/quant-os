@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApp } from '../store/AppState';
 import { today, formatLong, addDays } from '../lib/date';
-import { ENERGY_LABEL } from '../engine/taskGenerator';
+import { blocksForDate, freeSlots, toMinutes } from '../engine/scheduler';
 import type { EnergyMode, Task } from '../models';
 import { Card, SectionTitle, EmptyState, Field } from '../components/ui';
 import { TaskItem } from '../components/TaskItem';
@@ -12,7 +13,7 @@ const ENERGIES: EnergyMode[] = ['low', 'normal', 'high'];
 
 export default function Today() {
   const app = useApp();
-  const { state, energyFor, setEnergy, ensureTasksForDate, regenerateTasks, rescheduleMissed, addTask } = app;
+  const { state, energyFor, setEnergy, ensureTasksForDate, regenerateTasks, rescheduleMissed, addTask, rescheduleDay } = app;
   const d = today();
   const [notes, setNotes] = useState<string[]>([]);
   const [showAdd, setShowAdd] = useState(false);
@@ -25,13 +26,25 @@ export default function Today() {
 
   const energy = energyFor(d);
   const tasks = useMemo(() => state.tasks.filter((t) => t.date === d), [state.tasks, d]);
+  const doneTasks = tasks.filter((t) => t.status === 'done');
   const totalMin = tasks.filter((t) => t.status !== 'done').reduce((a, t) => a + t.minutes, 0);
-  const doneMin = tasks.filter((t) => t.status === 'done').reduce((a, t) => a + t.minutes, 0);
-  const pct = tasks.length ? Math.round((tasks.filter((t) => t.status === 'done').length / tasks.length) * 100) : 0;
+  const doneMin = doneTasks.reduce((a, t) => a + t.minutes, 0);
+  const pct = tasks.length ? Math.round((doneTasks.length / tasks.length) * 100) : 0;
 
-  // Missed core tasks from yesterday
   const yesterday = addDays(d, -1);
   const missedYesterday = state.tasks.filter((t) => t.date === yesterday && t.status === 'pending' && t.priority === 'core');
+
+  const blocks = blocksForDate(state.fixedBlocks, d);
+  const { freeMinutes, busyMinutes } = freeSlots(state.fixedBlocks, state.schedule, d);
+  const scheduled = tasks.filter((t) => t.startTime);
+  const unscheduled = tasks.filter((t) => !t.startTime);
+
+  const timeline = useMemo(() => {
+    const items: { key: string; start: string; kind: 'block' | 'task'; ref: Task | (typeof blocks)[number] }[] = [];
+    blocks.forEach((b) => items.push({ key: `b-${b.id}`, start: b.start, kind: 'block', ref: b }));
+    scheduled.forEach((t) => items.push({ key: `t-${t.id}`, start: t.startTime as string, kind: 'task', ref: t }));
+    return items.sort((a, b) => toMinutes(a.start) - toMinutes(b.start));
+  }, [blocks, scheduled]);
 
   return (
     <div className="space-y-5">
@@ -48,7 +61,7 @@ export default function Today() {
                 onClick={() => setNotes(setEnergy(d, e).notes)}
                 className={`px-3 py-1.5 text-xs font-medium capitalize ${energy === e ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
               >
-                {e === 'low' ? 'Min' : e}
+                {e === 'low' ? 'Min' : e === 'high' ? 'Big' : 'Normal'}
               </button>
             ))}
           </div>
@@ -56,7 +69,25 @@ export default function Today() {
         </div>
       </div>
 
-      <p className="text-xs text-slate-400">{ENERGY_LABEL[energy]}</p>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Card>
+          <div className="label">To do</div>
+          <div className="mt-1 text-2xl font-bold">{totalMin}<span className="text-sm font-normal text-slate-400">m</span></div>
+        </Card>
+        <Card>
+          <div className="label">Done</div>
+          <div className="mt-1 text-2xl font-bold text-emerald-500">{doneMin}<span className="text-sm font-normal text-slate-400">m</span></div>
+        </Card>
+        <Card>
+          <div className="label">Completion</div>
+          <div className="mt-1 text-2xl font-bold text-indigo-500">{pct}%</div>
+        </Card>
+        <Card>
+          <div className="label">Free time</div>
+          <div className="mt-1 text-2xl font-bold">{Math.round((freeMinutes / 60) * 10) / 10}<span className="text-sm font-normal text-slate-400">h</span></div>
+          <div className="text-[10px] text-slate-400">{Math.round((busyMinutes / 60) * 10) / 10}h committed</div>
+        </Card>
+      </div>
 
       {/* Adaptive engine notes */}
       {notes.length > 0 && (
@@ -73,30 +104,70 @@ export default function Today() {
         <Card className="border-amber-300 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10">
           <div className="flex items-center justify-between gap-3">
             <div className="text-sm text-slate-700 dark:text-slate-200">
-              You have <b>{missedYesterday.length}</b> unfinished core task(s) from yesterday. Reschedule them intelligently across the next few days?
+              You have <b>{missedYesterday.length}</b> unfinished core task(s) from yesterday. Spread them across the next few days?
             </div>
             <button className="btn-primary" onClick={() => { const n = rescheduleMissed(yesterday); alert(`Rescheduled ${n} task(s) across the next 3 days.`); }}>Reschedule</button>
           </div>
         </Card>
       )}
 
-      <div className="grid grid-cols-3 gap-3">
-        <Card><div className="label">Remaining time</div><div className="mt-1 text-2xl font-bold">{totalMin}<span className="text-sm font-normal text-slate-400">m</span></div></Card>
-        <Card><div className="label">Done</div><div className="mt-1 text-2xl font-bold text-emerald-500">{doneMin}<span className="text-sm font-normal text-slate-400">m</span></div></Card>
-        <Card><div className="label">Completion</div><div className="mt-1 text-2xl font-bold text-indigo-500">{pct}%</div></Card>
-      </div>
-
+      {/* ------------------------------------------------------- timeline */}
       <Card>
-        <SectionTitle right={<button className="btn-ghost" onClick={() => setShowAdd(!showAdd)}>+ Add task</button>}>Tasks</SectionTitle>
-        {showAdd && <AddTaskForm date={d} onAdd={(t) => { addTask(t); setShowAdd(false); }} />}
-        {tasks.length === 0 ? (
-          <EmptyState>No tasks. Set your energy level to generate today's plan.</EmptyState>
+        <SectionTitle right={
+          <div className="flex items-center gap-3">
+            {blocks.length > 0 && <button className="text-xs text-indigo-500 hover:underline" onClick={() => rescheduleDay(d)}>Re-fit times</button>}
+            <button className="btn-ghost" onClick={() => setShowAdd(!showAdd)}>+ Add task</button>
+          </div>
+        }>
+          Your day
+        </SectionTitle>
+
+        {showAdd && <AddTaskForm date={d} onAdd={(t) => { addTask(t); setShowAdd(false); rescheduleDay(d); }} />}
+
+        {timeline.length === 0 ? (
+          <EmptyState>Nothing scheduled. Set your energy level to generate the plan.</EmptyState>
         ) : (
-          <div className="space-y-2">
-            {tasks.map((t) => <TaskItem key={t.id} task={t} />)}
+          <div className="space-y-1.5">
+            {timeline.map((it) => (
+              <div key={it.key} className="flex gap-3">
+                <div className="w-11 shrink-0 pt-1 text-right text-xs font-mono text-slate-400">{it.start}</div>
+                <div className="min-w-0 flex-1">
+                  {it.kind === 'block' ? (
+                    <FixedRow title={(it.ref as (typeof blocks)[number]).title} start={it.start} end={(it.ref as (typeof blocks)[number]).end} campus={(it.ref as (typeof blocks)[number]).location === 'campus'} />
+                  ) : (
+                    <TaskItem task={it.ref as Task} compact />
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {unscheduled.length > 0 && (
+          <div className="mt-4 border-t border-slate-200 pt-3 dark:border-slate-800">
+            <div className="label mb-2">No free slot found</div>
+            <div className="space-y-2">
+              {unscheduled.map((t) => <TaskItem key={t.id} task={t} />)}
+            </div>
+            <p className="mt-2 text-xs text-slate-400">
+              Your calendar is tight today. Either trim something, or{' '}
+              <Link to="/settings" className="text-indigo-500 hover:underline">adjust your working hours</Link>.
+            </p>
           </div>
         )}
       </Card>
+    </div>
+  );
+}
+
+function FixedRow({ title, start, end, campus }: { title: string; start: string; end: string; campus: boolean }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-800/40">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-slate-600 dark:text-slate-300">{title}</span>
+        <span className="text-xs text-slate-400">{start}–{end}</span>
+        {campus && <span className="text-[10px] font-bold text-amber-500">CAMPUS</span>}
+      </div>
     </div>
   );
 }

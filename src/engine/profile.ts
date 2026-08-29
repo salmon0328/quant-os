@@ -58,11 +58,15 @@ export function neglectedPillar(state: AppState, dateISO: string): {
   return { pillar: worst, ratio: ratios[worst], extraHours: Math.round((deficitMin / 60) * 2) / 2 };
 }
 
-// Completion rate over the trailing window (for adaptive difficulty).
-export function recentCompletionRate(state: AppState, dateISO: string, days = 7): number {
+/**
+ * Completion rate over the trailing window (for adaptive difficulty).
+ * Returns null when there is no history yet — a brand-new user should not be
+ * told they are "completing >85%" and have their workload nudged up.
+ */
+export function recentCompletionRate(state: AppState, dateISO: string, days = 7): number | null {
   const start = addDays(dateISO, -days);
   const past = state.tasks.filter((t) => t.date >= start && t.date < dateISO);
-  if (past.length === 0) return 1;
+  if (past.length === 0) return null;
   const done = past.filter((t) => t.status === 'done').length;
   return done / past.length;
 }

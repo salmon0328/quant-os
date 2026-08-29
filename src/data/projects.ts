@@ -1,7 +1,18 @@
-import type { Project } from '../models';
+import type { Project, ProjectResource } from '../models';
 
 function ms(id: string, title: string, week?: number) {
   return { id, title, done: false, week };
+}
+
+function r(
+  id: string,
+  label: string,
+  url: string,
+  type: ProjectResource['type'],
+  note?: string,
+  needsCampus?: boolean
+): ProjectResource {
+  return { id, label, url, type, note, needsCampus };
 }
 
 export const PROJECTS: Project[] = [
@@ -13,7 +24,20 @@ export const PROJECTS: Project[] = [
     skills: ['Python', 'NumPy', 'SciPy', 'finance maths'],
     status: 'backlog',
     nextAction: 'Set up repo + implement d1/d2 and call/put price functions.',
+    effort: '1 weekend',
     pillars: ['finance', 'programming'],
+    starter: [
+      'Create the repo and a single pricing.py file — nothing else.',
+      'Write the d1 and d2 helper functions first (they are the whole model).',
+      'Test against a worked example before adding anything else.',
+    ],
+    resources: [
+      r('p1-r1', 'Hull — Ch. 13/15 (Options chapter)', 'https://www-2.rotman.utoronto.ca/~hull/ofod/index.html', 'reading', 'The canonical derivation. Read before coding.'),
+      r('p1-r2', 'QuantLib — reference implementation', 'https://github.com/lballabio/QuantLib', 'repo', 'When you are stuck, see how the professionals write their analytic engine.'),
+      r('p1-r3', 'SciPy — stats.norm', 'https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.norm.html', 'docs', 'You need the normal CDF for N(d1), N(d2).'),
+      r('p1-r4', 'QuantStart — Black-Scholes in Python', 'https://www.quantstart.com/', 'guide', 'Step-by-step walkthrough if you get stuck.'),
+      r('p1-r5', 'CBOE — options data & quotes', 'https://www.cboe.com/us/options/', 'dataset', 'Sanity-check your prices against live quotes.'),
+    ],
     milestones: [
       ms('p1m1', 'Implement d1, d2, call & put price', 8),
       ms('p1m2', 'Add unit tests vs known values', 8),
@@ -28,7 +52,19 @@ export const PROJECTS: Project[] = [
     skills: ['SciPy optimisation', 'numerical methods', 'finance'],
     status: 'backlog',
     nextAction: 'Use Brent/Newton on BS price to solve for sigma.',
+    effort: '1 weekend',
     pillars: ['finance', 'programming'],
+    starter: [
+      'Reuse your Black-Scholes pricer from p1 as a function of sigma.',
+      'Plot price vs sigma — you are finding where it crosses the market price.',
+      'Start with bisection (always converges), then add Newton for speed.',
+    ],
+    resources: [
+      r('p2-r1', 'SciPy — optimize.brentq', 'https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.brentq.html', 'docs', 'Robust bracketed root-finder. Start here.'),
+      r('p2-r2', 'Hull — implied volatility (Ch. 15/20)', 'https://www-2.rotman.utoronto.ca/~hull/ofod/index.html', 'reading'),
+      r('p2-r3', 'yfinance — free option chains', 'https://github.com/ranaroussi/yfinance', 'repo', 'Pull real option chains to test on.'),
+      r('p2-r4', 'CBOE VIX resource hub', 'https://www.cboe.com/tradable_products/vix/', 'dataset', 'Cross-check your IV against the index methodology.'),
+    ],
     milestones: [
       ms('p2m1', 'Newton + bisection fallback solver', 10),
       ms('p2m2', 'Handle edge cases / no-solution', 10),
@@ -43,7 +79,19 @@ export const PROJECTS: Project[] = [
     skills: ['pandas', 'data analysis', 'finance'],
     status: 'backlog',
     nextAction: 'Assemble price + option data; compute rolling HV and IV.',
+    effort: '1 week',
     pillars: ['finance', 'programming'],
+    starter: [
+      'Get 1-2 years of daily prices for one ticker with pandas.',
+      'Compute 20-day rolling realised vol (annualise it).',
+      'Overlay the IV you solved in p2 — the gap is the story.',
+    ],
+    resources: [
+      r('p3-r1', 'pandas — rolling windows', 'https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.rolling.html', 'docs'),
+      r('p3-r2', 'yfinance', 'https://github.com/ranaroussi/yfinance', 'repo', 'Free daily price history for prototyping.'),
+      r('p3-r3', 'FRED — macro & rates series', 'https://fred.stlouisfed.org/', 'dataset', 'Add a macro overlay to explain vol regimes.'),
+      r('p3-r4', 'Bloomberg Terminal — historical vol (HVG)', 'https://www.bloomberg.com/professional/', 'tool', 'Professional-grade vol data; verify your numbers.', true),
+    ],
     milestones: [
       ms('p3m1', 'Compute rolling realised vol', 11),
       ms('p3m2', 'Extract IV series', 11),
@@ -58,7 +106,19 @@ export const PROJECTS: Project[] = [
     skills: ['time series', 'statistics', 'Python (arch)'],
     status: 'backlog',
     nextAction: 'Fit GARCH(1,1) on returns; inspect parameters.',
+    effort: '1 week',
     pillars: ['finance', 'ai'],
+    starter: [
+      'Install the `arch` package — do not implement GARCH from scratch yet.',
+      'Fit on a single index return series and print the summary.',
+      'Interpret alpha + beta: persistence = alpha + beta, close to 1 is the point.',
+    ],
+    resources: [
+      r('p4-r1', 'arch — Python GARCH library', 'https://bashtage.github.io/arch/', 'docs', 'The standard implementation. Read the "Introduction" page first.'),
+      r('p4-r2', 'arch on GitHub', 'https://github.com/bashtage/arch', 'repo'),
+      r('p4-r3', 'statsmodels — time series', 'https://www.statsmodels.org/stable/tsa.html', 'docs', 'For ACF/PACF and Ljung-Box residual diagnostics.'),
+      r('p4-r4', 'FRED', 'https://fred.stlouisfed.org/', 'dataset'),
+    ],
     milestones: [
       ms('p4m1', 'Fit GARCH(1,1)', 12),
       ms('p4m2', 'Rolling one-step forecasts', 12),
@@ -73,7 +133,18 @@ export const PROJECTS: Project[] = [
     skills: ['time series', 'regression', 'pandas'],
     status: 'backlog',
     nextAction: 'Build daily/weekly/monthly RV features and OLS fit.',
+    effort: '1 weekend',
     pillars: ['finance', 'ai'],
+    starter: [
+      'Compute daily realised variance (squared returns, or 5-min RV if you have the data).',
+      'Build three lag features: 1-day, 5-day (weekly), 22-day (monthly).',
+      'One OLS regression — done. Compare against your GARCH forecasts.',
+    ],
+    resources: [
+      r('p5-r1', 'Corsi (2009) — HAR paper', 'https://papers.ssrn.com/sol3/papers.cfm?abstract_id=797306', 'reading', 'The original model. Short and readable.'),
+      r('p5-r2', 'statsmodels OLS', 'https://www.statsmodels.org/stable/generated/statsmodels.regression.linear_model.OLS.html', 'docs'),
+      r('p5-r3', 'pandas — resample', 'https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.resample.html', 'docs'),
+    ],
     milestones: [
       ms('p5m1', 'Construct HAR features', 13),
       ms('p5m2', 'Fit and forecast', 13),
@@ -88,7 +159,19 @@ export const PROJECTS: Project[] = [
     skills: ['backtesting', 'evaluation', 'statistics'],
     status: 'backlog',
     nextAction: 'Define OOS split; compute QLIKE/MSE; test significance.',
+    effort: '2-3 weeks',
     pillars: ['finance', 'research'],
+    starter: [
+      'Write down the evaluation protocol BEFORE you run anything (split, window, metrics).',
+      'Produce two aligned forecast series from p4 and p5.',
+      'Only then compare — and run Diebold-Mariano before claiming a winner.',
+    ],
+    resources: [
+      r('p6-r1', 'Diebold-Mariano test', 'https://www.statsmodels.org/stable/generated/statsmodels.stats.diagnostic.acorr_ljungbox.html', 'docs', 'statsmodels diagnostics entry point.'),
+      r('p6-r2', 'López de Prado — Advances in Financial ML', 'https://www.wiley.com/en-us/Advances+in+Financial+Machine+Learning-p-9781119482086', 'reading', 'Chapters on backtest overfitting and evaluation are essential here.'),
+      r('p6-r3', 'Papers With Code — time series forecasting', 'https://paperswithcode.com/task/time-series-forecasting', 'guide', 'Find baselines to sanity-check your numbers.'),
+      r('p6-r4', 'mlfinlab', 'https://github.com/hudson-and-thames/mlfinlab', 'repo', 'Reference implementations of financial ML methods.'),
+    ],
     milestones: [
       ms('p6m1', 'Expanding-window OOS protocol', 14),
       ms('p6m2', 'Loss functions (MSE, QLIKE)', 14),
@@ -103,7 +186,21 @@ export const PROJECTS: Project[] = [
     skills: ['factors', 'backtesting', 'risk'],
     status: 'backlog',
     nextAction: 'Build factor, form portfolios, simulate with costs.',
+    effort: '2-3 weeks',
     pillars: ['finance', 'research'],
+    starter: [
+      'Pick ONE factor (e.g. 12-1 momentum) and define it in pseudo-code first.',
+      'Get a universe + prices; form decile portfolios by lagged signal.',
+      'Add transaction costs before you look at the returns — this is the trap.',
+    ],
+    resources: [
+      r('p7-r1', 'Kenneth French Data Library', 'https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/data_library.html', 'dataset', 'Free factor returns — the perfect benchmark for your own construction.'),
+      r('p7-r2', 'Open Asset Pricing', 'https://www.openassetpricing.com/', 'dataset', 'Huge set of replicated cross-sectional predictors.'),
+      r('p7-r3', 'vectorbt — fast backtesting', 'https://vectorbt.dev/', 'tool', 'Vectorised backtests in pandas; good for iteration speed.'),
+      r('p7-r4', 'mlfinlab', 'https://github.com/hudson-and-thames/mlfinlab', 'repo', 'Feature importance, purged CV, sample weights.'),
+      r('p7-r5', 'López de Prado — AFML', 'https://www.wiley.com/en-us/Advances+in+Financial+Machine+Learning-p-9781119482086', 'reading', 'Read ch. on backtesting before you trust any Sharpe.'),
+      r('p7-r6', 'WRDS (CRSP/Compustat via NTU)', 'https://wrds-www.wharton.upenn.edu/', 'dataset', 'Institutional data if you have access.'),
+    ],
     milestones: [
       ms('p7m1', 'Factor construction & universe', 20),
       ms('p7m2', 'Portfolio formation + costs', 20),
@@ -118,7 +215,21 @@ export const PROJECTS: Project[] = [
     skills: ['ML', 'feature engineering', 'evaluation'],
     status: 'backlog',
     nextAction: 'Define problem + dataset spec.',
+    effort: '1 month+',
     pillars: ['ai', 'finance', 'research'],
+    starter: [
+      'Write the problem in one sentence: "Given X, predict Y, evaluated by Z."',
+      'Build the dumbest possible baseline first (e.g. yesterday’s value).',
+      'Only earn the right to use a model by beating that baseline out-of-sample.',
+    ],
+    resources: [
+      r('p8-r1', 'López de Prado — AFML', 'https://www.wiley.com/en-us/Advances+in+Financial+Machine+Learning-p-9781119482086', 'reading', 'Labelling, purged CV, sample weights, backtest overfitting. Read early.'),
+      r('p8-r2', 'mlfinlab', 'https://github.com/hudson-and-thames/mlfinlab', 'repo', 'Production implementations of the AFML methods.'),
+      r('p8-r3', 'scikit-learn — user guide', 'https://scikit-learn.org/stable/user_guide.html', 'docs'),
+      r('p8-r4', 'Stanford CS229', 'https://cs229.stanford.edu/', 'guide', 'Theory refresh when you need to defend a modelling choice.'),
+      r('p8-r5', 'arXiv q-fin', 'https://arxiv.org/list/q-fin/recent', 'reading', 'Find comparable work so you are not reinventing the wheel.'),
+      r('p8-r6', 'Bloomberg BQuant', 'https://www.bloomberg.com/professional/products/bquant/', 'tool', 'Pull professional-grade data when on campus.', true),
+    ],
     milestones: [
       ms('p8m1', 'Problem framing + dataset', 29),
       ms('p8m2', 'Baseline + honest OOS eval', 30),
@@ -134,7 +245,21 @@ export const PROJECTS: Project[] = [
     skills: ['RL', 'PyTorch', 'experimentation'],
     status: 'backlog',
     nextAction: 'Implement a PPO baseline on a standard environment.',
+    effort: '2-3 weeks',
     pillars: ['ai', 'research'],
+    starter: [
+      'Start with tabular Q-learning on a toy env — the Bellman update must be obvious to you.',
+      'Then implement PPO from scratch; ~200 lines is enough.',
+      'Run one ablation and write it up. The write-up is half the value.',
+    ],
+    resources: [
+      r('p9-r1', 'Sutton & Barto (free official PDF)', 'http://incompleteideas.net/book/the-book-2nd.html', 'reading', 'Chapters 3-6 then 13 (policy gradients).'),
+      r('p9-r2', 'OpenAI Spinning Up in Deep RL', 'https://spinningup.openai.com/en/latest/', 'guide', 'The clearest PPO explanation available.'),
+      r('p9-r3', 'CleanRL — single-file implementations', 'https://github.com/vwxyzjn/cleanrl', 'repo', 'Readable PPO you can diff your own against.'),
+      r('p9-r4', 'Stable-Baselines3', 'https://github.com/DLR-RM/stable-baselines3', 'repo', 'Reference baselines for comparison.'),
+      r('p9-r5', 'Gymnasium', 'https://gymnasium.farama.org/', 'docs', 'Standard environments.'),
+      r('p9-r6', 'Stanford CS234 — RL', 'https://web.stanford.edu/class/cs234/', 'guide', 'Course notes if you want more theory.'),
+    ],
     milestones: [
       ms('p9m1', 'Tabular Q-learning warm-up', 27),
       ms('p9m2', 'PPO baseline', 28),

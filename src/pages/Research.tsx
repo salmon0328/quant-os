@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useApp } from '../store/AppState';
 import { Card, SectionTitle, Modal, Field, EmptyState } from '../components/ui';
 import type { PaperNote } from '../models';
@@ -48,8 +49,11 @@ export default function Research() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Research</h1>
-          <p className="text-sm text-slate-400">Never just "read" a paper — every paper produces notes via the 10-point template.</p>
+          <h1 className="text-2xl font-bold">Deep dives</h1>
+          <p className="text-sm text-slate-400">
+            The full 10-point critique template — for the rare paper worth the effort. For everything else, use{' '}
+            <Link to="/insights" className="text-indigo-500 hover:underline">Insights</Link> (three lines and done).
+          </p>
         </div>
         <button className="btn-primary" onClick={() => setEditing({ ...emptyPaper, date: today() })}>+ New paper note</button>
       </div>

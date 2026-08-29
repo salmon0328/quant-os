@@ -1,12 +1,17 @@
 import React, { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import type { AppState, EnergyMode, Task, KnowledgeEntry, DayLog } from '../models';
+import type {
+  AppState, CardProgress, EnergyMode, FeedItem, FixedBlock, Insight,
+  ScheduleSettings, Task, KnowledgeEntry, DayLog,
+} from '../models';
+import { DEFAULT_SCHEDULE } from '../models';
 import { PILLARS } from '../data/pillars';
 import { RESOURCES } from '../data/resources';
 import { PROJECTS } from '../data/projects';
 import { KNOWLEDGE } from '../data/knowledge';
 import { today, mondayOf, addDays } from '../lib/date';
-import { generateTasks } from '../engine/taskGenerator';
+import { generateTasks, scheduleExisting } from '../engine/taskGenerator';
 import { scheduleNextReview, initReview } from '../engine/spacedRepetition';
+import { gradeCard } from '../data/flashcards';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import { useAuth } from './AuthState';
 
@@ -41,6 +46,15 @@ function buildInitialState(): AppState {
     theme: 'dark',
     streak: 0,
     learnProgress: {},
+    // --- v2 ---
+    schedule: { ...DEFAULT_SCHEDULE },
+    fixedBlocks: [],
+    feed: [],
+    cardProgress: {},
+    deckSize: 0,
+    drillLogs: [],
+    insights: [],
+    seedVersion: 2,
   };
 }
 
@@ -49,6 +63,7 @@ function buildInitialState(): AppState {
 // manual JSON import.
 function hydrate(parsed: Partial<AppState>): AppState {
   const base = buildInitialState();
+
   // Refresh resource definitions from source, but keep the user's per-resource
   // data (progress, their own PDF link, and any access override they set).
   const savedById = new Map((parsed.resources ?? []).map((r) => [r.id, r]));
@@ -58,13 +73,38 @@ function hydrate(parsed: Partial<AppState>): AppState {
       ? { ...r, progress: saved.progress, pdfLink: saved.pdfLink, access: saved.access ?? r.access }
       : r;
   });
-  // Keep any fully user-created resources that aren't in the seed list.
   const extraResources = (parsed.resources ?? []).filter((r) => !base.resources.some((b) => b.id === r.id));
+
+  // Seed projects may gain new links/steps — refresh those, keep user progress.
+  const savedProjects = new Map((parsed.projects ?? []).map((p) => [p.id, p]));
+  const mergedProjects = base.projects.map((p) => {
+    const saved = savedProjects.get(p.id);
+    if (!saved) return p;
+    return {
+      ...p,
+      ...saved,
+      resources: p.resources ?? saved.resources,
+      starter: p.starter ?? saved.starter,
+      effort: p.effort ?? saved.effort,
+    };
+  });
+  const extraProjects = (parsed.projects ?? []).filter((p) => !base.projects.some((b) => b.id === p.id));
+
   return {
     ...base,
     ...parsed,
     pillars: parsed.pillars?.length ? parsed.pillars : base.pillars,
     resources: [...mergedResources, ...extraResources],
+    projects: [...mergedProjects, ...extraProjects],
+    // v2 fields tolerate older payloads.
+    schedule: { ...base.schedule, ...(parsed.schedule ?? {}) },
+    fixedBlocks: parsed.fixedBlocks ?? base.fixedBlocks,
+    feed: parsed.feed ?? base.feed,
+    cardProgress: parsed.cardProgress ?? base.cardProgress,
+    deckSize: parsed.deckSize ?? base.deckSize,
+    drillLogs: parsed.drillLogs ?? base.drillLogs,
+    insights: parsed.insights ?? base.insights,
+    seedVersion: base.seedVersion,
   } as AppState;
 }
 
@@ -93,6 +133,12 @@ function reducer(state: AppState, action: Action): AppState {
   }
 }
 
+export interface CalendarSyncResult {
+  ok: boolean;
+  error?: string;
+  imported?: number;
+}
+
 interface Ctx {
   state: AppState;
   patch: (p: Partial<AppState>) => void;
@@ -106,12 +152,31 @@ interface Ctx {
   setEnergy: (date: string, energy: EnergyMode) => { notes: string[] };
   ensureTasksForDate: (date: string) => { notes: string[] };
   regenerateTasks: (date: string) => { notes: string[] };
+  rescheduleDay: (date: string) => void;
   toggleTask: (id: string) => void;
   addTask: (t: Task) => void;
   updateTask: (t: Task) => void;
   deleteTask: (id: string) => void;
   rescheduleMissed: (fromDate: string) => number;
   reviewKnowledge: (id: string, remembered: boolean) => void;
+  // v2: rhythm
+  updateSchedule: (p: Partial<ScheduleSettings>) => void;
+  syncCalendar: () => Promise<CalendarSyncResult>;
+  addFixedBlock: (b: FixedBlock) => void;
+  updateFixedBlock: (b: FixedBlock) => void;
+  removeFixedBlock: (id: string) => void;
+  // v2: inbox
+  addFeedItem: (f: FeedItem) => void;
+  setFeedStatus: (id: string, status: FeedItem['status']) => void;
+  removeFeedItem: (id: string) => void;
+  // v2: drill
+  setDeckSize: (n: number) => void;
+  reviewCard: (id: string, remembered: boolean) => void;
+  logDrill: (correct: number, total: number) => void;
+  // v2: insights
+  addInsight: (i: Insight) => void;
+  updateInsight: (i: Insight) => void;
+  removeInsight: (id: string) => void;
 }
 
 const AppCtx = createContext<Ctx | null>(null);
@@ -234,6 +299,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const patch = (p: Partial<AppState>) => dispatch({ type: 'PATCH', patch: p });
 
+  // ------------------------------------------------------------------ tasks
+
   const energyFor = (date: string): EnergyMode => {
     const log = state.dayLogs.find((d) => d.date === date);
     return log?.energy ?? 'normal';
@@ -242,7 +309,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const setEnergy = (date: string, energy: EnergyMode) => {
     const logs = state.dayLogs.slice();
     const idx = logs.findIndex((d) => d.date === date);
-    const budgetMap = { low: 55, min: 55, normal: 110, high: 180 } as const;
+    const budgetMap = { low: 45, min: 45, normal: 120, high: 180 } as const;
     const log: DayLog = idx >= 0
       ? { ...logs[idx], energy, availableMinutes: budgetMap[energy] }
       : { date, energy, availableMinutes: budgetMap[energy], completedTaskIds: [] };
@@ -258,7 +325,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const ensureTasksForDate = (date: string) => {
     const existing = state.tasks.filter((t) => t.date === date && t.generated);
-    if (existing.length > 0) return { notes: [] };
+    if (existing.length > 0) return { notes: [] as string[] };
     const energy = energyFor(date);
     const { tasks, notes } = generateTasks(state, date, energy);
     patch({ tasks: [...state.tasks, ...tasks] });
@@ -271,6 +338,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const { tasks, notes } = generateTasks({ ...state, tasks: nonGen }, date, energy);
     patch({ tasks: [...nonGen, ...tasks] });
     return { notes };
+  };
+
+  /** Re-place the day's tasks into free slots without changing what they are. */
+  const rescheduleDay = (date: string) => {
+    const days = state.tasks.filter((t) => t.date === date);
+    const rest = state.tasks.filter((t) => t.date !== date);
+    patch({ tasks: [...rest, ...scheduleExisting(state, date, days)] });
   };
 
   const toggleTask = (id: string) => {
@@ -299,6 +373,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       date: addDays(fromDate, 1 + (i % 3)), // spread across next 3 days
       rescheduledFrom: fromDate,
       generated: false,
+      startTime: undefined,
     }));
     patch({ tasks: [...rest, ...moved] });
     return moved.length;
@@ -311,6 +386,105 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ),
     });
   };
+
+  // --------------------------------------------------------------- schedule
+
+  const updateSchedule = (p: Partial<ScheduleSettings>) => {
+    const schedule = { ...(state.schedule ?? DEFAULT_SCHEDULE), ...p };
+    const next = { ...state, schedule };
+    patch({ schedule, tasks: rescheduleAll(next) });
+  };
+
+  /** Re-place every upcoming task after the rhythm changes. */
+  const rescheduleAll = (s: AppState): Task[] => {
+    const byDate = new Map<string, Task[]>();
+    for (const t of s.tasks) {
+      const arr = byDate.get(t.date) ?? [];
+      arr.push(t);
+      byDate.set(t.date, arr);
+    }
+    return [...byDate.entries()].flatMap(([date, tasks]) => scheduleExisting(s, date, tasks));
+  };
+
+  const syncCalendar = async (): Promise<CalendarSyncResult> => {
+    const url = state.schedule?.icsUrl?.trim();
+    if (!url) return { ok: false, error: 'Paste your calendar’s secret iCal link first.' };
+    const from = today();
+    const to = addDays(from, 42);
+    const tz = state.schedule?.tzOffsetMinutes ?? 480;
+    try {
+      const res = await fetch(
+        `/api/calendar?url=${encodeURIComponent(url)}&from=${from}&to=${to}&tz=${tz}`
+      );
+      const data = (await res.json()) as {
+        ok: boolean;
+        error?: string;
+        events?: { uid: string; title: string; start: string; end: string; days: number[] }[];
+      };
+      if (!data.ok) return { ok: false, error: data.error ?? 'Calendar sync failed.' };
+
+      const imported: FixedBlock[] = (data.events ?? []).map((e) => ({
+        id: `ics-${e.uid}-${e.start}`,
+        title: e.title,
+        start: e.start,
+        end: e.end,
+        days: e.days,
+        location: 'anywhere',
+        source: 'ics',
+        icsUid: e.uid,
+      }));
+      const manual = (state.fixedBlocks ?? []).filter((b) => b.source !== 'ics');
+      patch({ fixedBlocks: [...manual, ...imported], tasks: rescheduleAll({ ...state, fixedBlocks: [...manual, ...imported] }) });
+      return { ok: true, imported: imported.length };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : 'Calendar sync failed.' };
+    }
+  };
+
+  const addFixedBlock = (b: FixedBlock) => {
+    const blocks = [...(state.fixedBlocks ?? []), b];
+    patch({ fixedBlocks: blocks, tasks: rescheduleAll({ ...state, fixedBlocks: blocks }) });
+  };
+  const updateFixedBlock = (b: FixedBlock) => {
+    const blocks = (state.fixedBlocks ?? []).map((x) => (x.id === b.id ? b : x));
+    patch({ fixedBlocks: blocks, tasks: rescheduleAll({ ...state, fixedBlocks: blocks }) });
+  };
+  const removeFixedBlock = (id: string) => {
+    const blocks = (state.fixedBlocks ?? []).filter((x) => x.id !== id);
+    patch({ fixedBlocks: blocks, tasks: rescheduleAll({ ...state, fixedBlocks: blocks }) });
+  };
+
+  // ------------------------------------------------------------------ inbox
+
+  const addFeedItem = (f: FeedItem) => patch({ feed: [f, ...(state.feed ?? [])] });
+  const setFeedStatus = (id: string, status: FeedItem['status']) =>
+    patch({ feed: (state.feed ?? []).map((f) => (f.id === id ? { ...f, status } : f)) });
+  const removeFeedItem = (id: string) => patch({ feed: (state.feed ?? []).filter((f) => f.id !== id) });
+
+  // ------------------------------------------------------------------ drill
+
+  const setDeckSize = (n: number) => {
+    if (state.deckSize !== n) patch({ deckSize: n });
+  };
+  const reviewCard = (id: string, remembered: boolean) => {
+    const prev: CardProgress | undefined = state.cardProgress?.[id];
+    patch({ cardProgress: { ...(state.cardProgress ?? {}), [id]: gradeCard(prev, remembered) } });
+  };
+  const logDrill = (correct: number, total: number) => {
+    const d = today();
+    const logs = (state.drillLogs ?? []).filter((l) => l.date !== d);
+    patch({ drillLogs: [...logs, { date: d, correct, total }].slice(-120) });
+  };
+
+  // --------------------------------------------------------------- insights
+
+  const addInsight = (i: Insight) => patch({ insights: [i, ...(state.insights ?? [])] });
+  const updateInsight = (i: Insight) =>
+    patch({ insights: (state.insights ?? []).map((x) => (x.id === i.id ? i : x)) });
+  const removeInsight = (id: string) =>
+    patch({ insights: (state.insights ?? []).filter((x) => x.id !== id) });
+
+  // ------------------------------------------------------------------ reset
 
   const reset = () => {
     localStorage.removeItem(STORAGE_KEY);
@@ -325,8 +499,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<Ctx>(
     () => ({
       state, patch, reset, importState, syncEnabled: isSupabaseConfigured, syncStatus,
-      energyFor, setEnergy, ensureTasksForDate, regenerateTasks,
+      energyFor, setEnergy, ensureTasksForDate, regenerateTasks, rescheduleDay,
       toggleTask, addTask, updateTask, deleteTask, rescheduleMissed, reviewKnowledge,
+      updateSchedule, syncCalendar, addFixedBlock, updateFixedBlock, removeFixedBlock,
+      addFeedItem, setFeedStatus, removeFeedItem,
+      setDeckSize, reviewCard, logDrill,
+      addInsight, updateInsight, removeInsight,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state, syncStatus]

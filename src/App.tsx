@@ -9,6 +9,9 @@ import Learn from './pages/Learn';
 import Markets from './pages/Markets';
 import Projects from './pages/Projects';
 import Research from './pages/Research';
+import Insights from './pages/Insights';
+import Inbox from './pages/Inbox';
+import Settings from './pages/Settings';
 import Career from './pages/Career';
 import Knowledge from './pages/Knowledge';
 import Resources from './pages/Resources';
@@ -51,7 +54,10 @@ function Gate() {
             <Route path="/learn" element={<Learn />} />
             <Route path="/markets" element={<Markets />} />
             <Route path="/projects" element={<Projects />} />
+            <Route path="/insights" element={<Insights />} />
             <Route path="/research" element={<Research />} />
+            <Route path="/inbox" element={<Inbox />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="/career" element={<Career />} />
             <Route path="/knowledge" element={<Knowledge />} />
             <Route path="/resources" element={<Resources />} />

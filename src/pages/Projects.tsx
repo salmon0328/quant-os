@@ -1,12 +1,18 @@
 import { useState } from 'react';
 import { useApp } from '../store/AppState';
 import { Card, Chip, ProgressBar, Modal, Field } from '../components/ui';
-import type { Project, ProjectStatus, Milestone } from '../models';
+import type { Project, ProjectStatus, Milestone, ProjectResource, ProjectResourceType } from '../models';
 import { uid } from '../lib/id';
 import { PILLARS } from '../data/pillars';
 
 const STATUS: ProjectStatus[] = ['backlog', 'active', 'paused', 'done'];
 const STATUS_TONE: Record<ProjectStatus, string> = { backlog: 'default', active: 'ai', paused: 'markets', done: 'output' };
+
+const RESOURCE_ICON: Record<ProjectResourceType, string> = {
+  repo: '⌨️', reading: '📕', guide: '🧭', dataset: '🗄️', video: '🎥', tool: '🛠️', docs: '📄',
+};
+
+const RESOURCE_TYPES: ProjectResourceType[] = ['guide', 'reading', 'repo', 'dataset', 'docs', 'tool', 'video'];
 
 const emptyProject: Project = {
   id: '', name: '', objective: '', whyItMatters: '', skills: [], status: 'backlog', nextAction: '', milestones: [], pillars: ['finance'],
@@ -16,6 +22,7 @@ export default function Projects() {
   const { state, patch } = useApp();
   const [filter, setFilter] = useState<string>('all');
   const [editing, setEditing] = useState<Project | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
 
   const projects = state.projects.filter((p) => filter === 'all' || p.status === filter);
 
@@ -58,6 +65,8 @@ export default function Projects() {
             </div>
             <div className="mt-1 flex flex-wrap gap-1">
               <Chip tone={STATUS_TONE[p.status]}>{p.status}</Chip>
+              {p.effort && <Chip>{p.effort}</Chip>}
+              {!!p.resources?.length && <Chip tone="output">{p.resources.length} links</Chip>}
               {p.pillars.map((pl) => { const px = PILLARS.find((x) => x.id === pl)!; return <span key={pl} className="text-[10px]" style={{ color: px.color }}>{px.name.split(' ')[0]}</span>; })}
             </div>
             <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{p.objective}</p>
@@ -78,6 +87,50 @@ export default function Projects() {
               <b>Next action:</b> {p.nextAction}
               {p.skills.length > 0 && <div className="mt-1 text-[10px] text-slate-400">Skills: {p.skills.join(', ')}</div>}
             </div>
+
+            <button
+              onClick={() => setOpenId(openId === p.id ? null : p.id)}
+              className="mt-2 text-xs text-indigo-500 hover:underline"
+            >
+              {openId === p.id ? 'Hide how to start' : 'How do I start? →'}
+            </button>
+
+            {openId === p.id && (
+              <div className="mt-2 space-y-3 rounded-lg border border-slate-200 p-3 dark:border-slate-700">
+                {!!p.starter?.length && (
+                  <div>
+                    <div className="label mb-1">First 30 minutes</div>
+                    <ol className="space-y-1">
+                      {p.starter.map((s, i) => (
+                        <li key={i} className="flex gap-2 text-xs text-slate-600 dark:text-slate-300">
+                          <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300">{i + 1}</span>
+                          <span>{s}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                {!!p.resources?.length && (
+                  <div>
+                    <div className="label mb-1">Resources</div>
+                    <div className="space-y-1">
+                      {p.resources.map((r) => (
+                        <a key={r.id} href={r.url} target="_blank" rel="noreferrer" className="flex items-start gap-2 rounded-md px-1.5 py-1 hover:bg-slate-50 dark:hover:bg-slate-800">
+                          <span className="mt-0.5 shrink-0 text-[13px] leading-none">{RESOURCE_ICON[r.type]}</span>
+                          <span className="min-w-0">
+                            <span className="text-xs text-indigo-500">{r.label}</span>
+                            {r.note && <span className="block text-[11px] text-slate-400">{r.note}</span>}
+                          </span>
+                          {r.needsCampus && <span className="ml-auto shrink-0 text-[10px] font-bold text-amber-500">CAMPUS</span>}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="mt-2 flex items-center gap-3 text-xs">
               {p.repoLink && <a href={p.repoLink} target="_blank" rel="noreferrer" className="text-indigo-500 hover:underline">Repo ↗</a>}
               <button className="text-slate-400 hover:underline" onClick={() => setEditing(p)}>Edit / log output</button>
@@ -98,6 +151,14 @@ export default function Projects() {
             <Field label="Next action"><input className="input" value={editing.nextAction} onChange={(e) => setEditing({ ...editing, nextAction: e.target.value })} /></Field>
             <Field label="Target date"><input type="date" className="input" value={editing.targetDate ?? ''} onChange={(e) => setEditing({ ...editing, targetDate: e.target.value })} /></Field>
             <Field label="Repository / link"><input className="input" value={editing.repoLink ?? ''} onChange={(e) => setEditing({ ...editing, repoLink: e.target.value })} /></Field>
+            <Field label="Rough effort">
+              <select className="input" value={editing.effort ?? ''} onChange={(e) => setEditing({ ...editing, effort: (e.target.value || undefined) as Project['effort'] })}>
+                <option value="">—</option>
+                {['1 weekend', '1 week', '2-3 weeks', '1 month+'].map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </Field>
+            <div className="sm:col-span-2"><StarterEditor value={editing.starter ?? []} onChange={(s) => setEditing({ ...editing, starter: s })} /></div>
+            <div className="sm:col-span-2"><ResourceEditor value={editing.resources ?? []} onChange={(rs) => setEditing({ ...editing, resources: rs })} /></div>
             <div className="sm:col-span-2"><Field label="Output produced"><textarea className="input" value={editing.output ?? ''} onChange={(e) => setEditing({ ...editing, output: e.target.value })} /></Field></div>
             <div className="sm:col-span-2"><Field label="Lessons learned"><textarea className="input" value={editing.lessons ?? ''} onChange={(e) => setEditing({ ...editing, lessons: e.target.value })} /></Field></div>
             <div className="sm:col-span-2"><MilestoneEditor value={editing.milestones} onChange={(ms) => setEditing({ ...editing, milestones: ms })} /></div>
@@ -105,6 +166,59 @@ export default function Projects() {
           </div>
         )}
       </Modal>
+    </div>
+  );
+}
+
+function StarterEditor({ value, onChange }: { value: string[]; onChange: (s: string[]) => void }) {
+  const [t, setT] = useState('');
+  return (
+    <div>
+      <div className="label mb-1">First 30 minutes (how to start)</div>
+      <ol className="space-y-1">
+        {value.map((s, i) => (
+          <li key={i} className="flex items-center gap-2 text-sm">
+            <span className="text-slate-400">{i + 1}.</span>
+            <span className="flex-1">{s}</span>
+            <button className="text-red-400" onClick={() => onChange(value.filter((_, j) => j !== i))}>✕</button>
+          </li>
+        ))}
+      </ol>
+      <div className="mt-1 flex gap-2">
+        <input className="input" placeholder="Add a first step…" value={t} onChange={(e) => setT(e.target.value)} />
+        <button className="btn-ghost" onClick={() => { if (t) { onChange([...value, t]); setT(''); } }}>Add</button>
+      </div>
+    </div>
+  );
+}
+
+function ResourceEditor({ value, onChange }: { value: ProjectResource[]; onChange: (r: ProjectResource[]) => void }) {
+  const blank: ProjectResource = { id: '', label: '', url: '', type: 'guide' };
+  const [draft, setDraft] = useState<ProjectResource>(blank);
+  return (
+    <div>
+      <div className="label mb-1">Resources (links, readings, repos)</div>
+      <div className="space-y-1">
+        {value.map((r) => (
+          <div key={r.id} className="flex items-center gap-2 text-sm">
+            <span className="shrink-0">{RESOURCE_ICON[r.type]}</span>
+            <span className="flex-1 truncate">{r.label}</span>
+            <span className="truncate text-[10px] text-slate-400">{r.url}</span>
+            <button className="text-red-400" onClick={() => onChange(value.filter((x) => x.id !== r.id))}>✕</button>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_auto_auto]">
+        <input className="input" placeholder="Label (e.g. SciPy brentq docs)" value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} />
+        <input className="input" placeholder="https://…" value={draft.url} onChange={(e) => setDraft({ ...draft, url: e.target.value })} />
+        <select className="input" value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value as ProjectResourceType })}>
+          {RESOURCE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <button
+          className="btn-ghost"
+          onClick={() => { if (draft.label && draft.url) { onChange([...value, { ...draft, id: uid('pr-') }]); setDraft(blank); } }}
+        >Add</button>
+      </div>
     </div>
   );
 }

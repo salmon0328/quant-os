@@ -3,8 +3,9 @@ import type { Task } from '../models';
 import { Chip } from './ui';
 import { useApp } from '../store/AppState';
 import { PILLARS } from '../data/pillars';
+import { endTimeOf } from '../engine/scheduler';
 
-export function TaskItem({ task, showDate }: { task: Task; showDate?: boolean }) {
+export function TaskItem({ task, compact, showDate }: { task: Task; compact?: boolean; showDate?: boolean }) {
   const { toggleTask, deleteTask, state } = useApp();
   const [open, setOpen] = useState(false);
   const done = task.status === 'done';
@@ -26,13 +27,26 @@ export function TaskItem({ task, showDate }: { task: Task; showDate?: boolean })
             <span className={`text-sm font-medium ${done ? 'text-slate-400 line-through' : 'text-slate-800 dark:text-slate-100'}`}>{task.title}</span>
             <Chip tone={task.category}>{task.category}</Chip>
             {pillar && <span className="text-[10px] font-semibold" style={{ color: pillar.color }}>{pillar.name.split(' ')[0]}</span>}
+            {task.startTime && (
+              <span className="font-mono text-[11px] text-indigo-500">
+                {task.startTime}–{endTimeOf(task)}
+              </span>
+            )}
             <span className="text-xs text-slate-400">{task.minutes}m</span>
             {task.priority === 'core' && <span className="text-[10px] font-bold text-indigo-500">CORE</span>}
+            {task.location === 'campus' && <span className="text-[10px] font-bold text-amber-500">CAMPUS</span>}
             {task.rescheduledFrom && <span className="text-[10px] text-amber-500">rescheduled</span>}
             {showDate && <span className="text-[10px] text-slate-400">{task.date}</span>}
           </div>
-          <button onClick={() => setOpen(!open)} className="mt-1 text-xs text-indigo-500 hover:underline">
-            {open ? 'Hide details' : 'Why / output / resource'}
+
+          {task.url && (
+            <a href={task.url} target="_blank" rel="noreferrer" className="mt-0.5 inline-block text-xs text-indigo-500 hover:underline">
+              Open source ↗
+            </a>
+          )}
+
+          <button onClick={() => setOpen(!open)} className="mt-1 text-xs text-slate-400 hover:underline">
+            {open ? 'Hide details' : compact ? 'Why / output' : 'Why / output / resource'}
           </button>
           {open && (
             <div className="mt-2 space-y-1.5 rounded-md bg-slate-50 p-2 text-xs dark:bg-slate-800/60">
