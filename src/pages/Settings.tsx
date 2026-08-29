@@ -14,6 +14,10 @@ export default function Settings() {
   const [syncing, setSyncing] = useState(false);
   const [msg, setMsg] = useState<{ tone: 'ok' | 'warn' | 'err'; text: string } | null>(null);
   const [allDay, setAllDay] = useState<{ title: string; start: string; end: string }[]>([]);
+  const [syncInfo, setSyncInfo] = useState<{
+    tasks: number;
+    stats?: { recurring: number; oneOff: number; allDay: number };
+  }>({ tasks: 0 });
   const [editing, setEditing] = useState<FixedBlock | null>(null);
 
   const preview = freeSlots(state.fixedBlocks, s, today());
@@ -29,9 +33,14 @@ export default function Settings() {
     } else if (res.failed) {
       setMsg({ tone: 'warn', text: `Imported ${res.imported ?? 0} commitments, but ${res.error ?? ''}` });
     } else {
-      setMsg({ tone: 'ok', text: `Imported ${res.imported ?? 0} recurring commitments from ${s.icsFeeds.length} calendar(s).` });
+      const st = res.stats;
+      const parts = st
+        ? `${st.recurring} weekly, ${st.oneOff} one-off`
+        : `${res.imported ?? 0} commitments`;
+      setMsg({ tone: 'ok', text: `Imported ${parts} from ${s.icsFeeds.length} calendar(s).` });
     }
     setAllDay(res.allDay ?? []);
+    setSyncInfo({ tasks: res.tasks ?? 0, stats: res.stats });
   };
 
   const setFeeds = (feeds: CalendarFeed[]) => updateSchedule({ icsFeeds: feeds });
@@ -200,8 +209,22 @@ export default function Settings() {
           </div>
         )}
 
+        {syncInfo.tasks > 0 && (
+          <div className="mt-3 rounded-md border border-amber-200 bg-amber-50/60 p-2.5 dark:border-amber-500/30 dark:bg-amber-500/10">
+            <div className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+              {syncInfo.tasks} Google Task(s) found — not imported
+            </div>
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+              Tasks have no start/end time, so they can't block time in your day. They're also
+              separate from this app's planner — merging two task lists would blow through the
+              {s.maxCoreTasks}-core-task cap that keeps the day achievable. Keep deadlines in
+              Quant-OS (Reviews → deadlines) and let the planner decide what fits today.
+            </p>
+          </div>
+        )}
+
         <p className="mt-2 text-[11px] text-slate-400">
-          Read-only, and fetched on the server: the browser can't reach Google's calendar directly, so the app asks its own endpoint to do it. Only <code className="font-mono">calendar.google.com</code> feeds are accepted. Multiple calendars are merged, and identical events across feeds are de-duplicated.
+          Read-only, and fetched on the server: the browser can't reach Google's calendar directly, so the app asks its own endpoint to do it. Only <code className="font-mono">calendar.google.com</code> feeds are accepted. Weekly events repeat; one-off events are pinned to their exact date.
         </p>
       </Card>
 
@@ -217,22 +240,31 @@ export default function Settings() {
           {state.fixedBlocks.length === 0 && <EmptyState>No commitments yet. Import your calendar or add them by hand.</EmptyState>}
           {[...state.fixedBlocks]
             .sort((a, b) => a.start.localeCompare(b.start))
-            .map((b) => (
-              <div key={b.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 p-2.5 dark:border-slate-700">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{b.title}</div>
-                  <div className="text-xs text-slate-400">
-                    {b.start}–{b.end} · {b.days.length ? b.days.map((d) => DAY_SHORT[d]).join(', ') : b.date}
-                    {b.location === 'campus' ? ' · on campus' : ''}
+            .map((b) => {
+              const weekly = b.days.length > 0;
+              return (
+                <div key={b.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 p-2.5 dark:border-slate-700">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium">{b.title}</div>
+                    <div className="text-xs text-slate-400">
+                      {b.start}–{b.end} ·{' '}
+                      {weekly
+                        ? `weekly: ${b.days.map((d) => DAY_SHORT[d]).join(', ')}`
+                        : `once, ${b.date ?? 'unscheduled'}`}
+                      {b.location === 'campus' ? ' · on campus' : ''}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {b.calendarLabel && <Chip>{b.calendarLabel}</Chip>}
+                    <Chip tone={b.source === 'ics' ? 'ai' : 'default'}>
+                      {b.source === 'ics' ? (weekly ? 'weekly' : 'one-off') : 'manual'}
+                    </Chip>
+                    <button className="text-xs text-indigo-500 hover:underline" onClick={() => setEditing(b)}>Edit</button>
+                    <button className="text-xs text-red-400 hover:underline" onClick={() => removeFixedBlock(b.id)}>✕</button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Chip tone={b.source === 'ics' ? 'ai' : 'default'}>{b.source === 'ics' ? 'calendar' : 'manual'}</Chip>
-                  <button className="text-xs text-indigo-500 hover:underline" onClick={() => setEditing(b)}>Edit</button>
-                  <button className="text-xs text-red-400 hover:underline" onClick={() => removeFixedBlock(b.id)}>✕</button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
         </div>
       </Card>
 

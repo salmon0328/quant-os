@@ -358,6 +358,8 @@ export interface FixedBlock {
   source: 'manual' | 'ics';
   /** Kept so a re-import updates rather than duplicates. */
   icsUid?: string;
+  /** Which subscribed calendar this came from (for display only). */
+  calendarLabel?: string;
 }
 
 export interface TimeSlot {

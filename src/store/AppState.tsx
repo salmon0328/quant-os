@@ -14,6 +14,9 @@ import { scheduleNextReview, initReview } from '../engine/spacedRepetition';
 import { gradeCard } from '../data/flashcards';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import { useAuth } from './AuthState';
+// Type-only: erased at build time, so the server's fetch logic stays out of the
+// browser bundle while the client still matches the API contract.
+import type { MultiCalendarResponse } from '../../api/_lib/icsProxy';
 
 const STORAGE_KEY = 'quant-os-state-v1';
 const LAST_SYNC_KEY = 'quant-os-last-sync-v1';
@@ -155,6 +158,9 @@ export interface CalendarSyncResult {
   failed?: number;
   /** All-day events — shown to the user, never used to block time. */
   allDay?: { title: string; start: string; end: string }[];
+  /** Google Tasks found in the feeds; reported, not imported. */
+  tasks?: number;
+  stats?: { recurring: number; oneOff: number; allDay: number };
 }
 
 interface Ctx {
@@ -433,24 +439,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     try {
       const qs = feeds.map((f) => `url=${encodeURIComponent(f.url.trim())}`).join('&');
       const res = await fetch(`/api/calendar?${qs}&from=${from}&to=${to}&tz=${tz}`);
-      const data = (await res.json()) as {
-        ok: boolean;
-        error?: string;
-        feeds?: { url: string; ok: boolean; error?: string }[];
-        events?: { uid: string; title: string; start: string; end: string; days: number[] }[];
-        allDay?: { title: string; start: string; end: string }[];
-      };
+      // Reuse the API's own response type so the client can't drift from it.
+      const data = (await res.json()) as MultiCalendarResponse;
       if (!data.ok) return { ok: false, error: data.error ?? 'Calendar sync failed.' };
 
+      // Map each event back to the calendar it came from, so three calendars
+      // stay tellable apart in the UI instead of one merged wall of text.
+      const labelFor = (url?: string) => {
+        if (!url) return undefined;
+        const feed = feeds.find((f) => f.url.trim() === url.trim());
+        return feed?.label?.trim() || undefined;
+      };
+
       const imported: FixedBlock[] = (data.events ?? []).map((e) => ({
-        id: `ics-${e.uid}-${e.start}`,
+        id: e.recurring ? `ics-${e.uid}-${e.start}` : `ics-${e.uid}-${e.start}-${e.date}`,
         title: e.title,
         start: e.start,
         end: e.end,
-        days: e.days,
+        // A one-off keeps its exact date and no weekdays; anything else would
+        // turn a single appointment into a weekly recurring block.
+        days: e.recurring ? e.days : [],
+        date: e.recurring ? undefined : e.date,
         location: 'anywhere',
         source: 'ics',
         icsUid: e.uid,
+        calendarLabel: labelFor(e.sourceUrl),
       }));
       const manual = (state.fixedBlocks ?? []).filter((b) => b.source !== 'ics');
       const next = { ...state, fixedBlocks: [...manual, ...imported] };
@@ -462,6 +475,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         imported: imported.length,
         failed: failed.length,
         allDay: data.allDay ?? [],
+        tasks: data.tasks ?? 0,
+        stats: data.stats,
         error: failed.length
           ? `${failed.length} of ${feeds.length} calendars failed: ${failed[0].error ?? 'unknown error'}`
           : undefined,

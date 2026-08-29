@@ -16,13 +16,24 @@ export interface IcsOptions {
   tzOffsetMinutes: number;
 }
 
-/** A recurring commitment collapsed from the expanded occurrences. */
+/** A commitment collapsed from the expanded occurrences. */
 export interface ParsedCommitment {
   uid: string;
   title: string;
   start: string; // "HH:MM"
   end: string; // "HH:MM"
-  days: number[]; // 0=Sun … 6=Sat
+  /** Weekdays this repeats on (0=Sun … 6=Sat). Empty for one-off events. */
+  days: number[];
+  /**
+   * True only when the source event carried an RRULE. This — not the number of
+   * occurrences — decides recurring status: an event that happens to fall in
+   * the window once is still weekly if it repeats.
+   */
+  recurring: boolean;
+  /** Set only for one-off events: the exact date, yyyy-mm-dd. */
+  date?: string;
+  /** Which feed this came from, so several calendars stay distinguishable. */
+  sourceUrl?: string;
   occurrences: number;
 }
 
@@ -40,6 +51,12 @@ export interface ParsedAllDay {
 export interface ParseResult {
   commitments: ParsedCommitment[];
   allDay: ParsedAllDay[];
+  /**
+   * Count of VTODO items (Google Tasks). Reported, not imported: the app runs
+   * its own planner, and silently merging two task systems would undo the
+   * "keep the day achievable" cap.
+   */
+  tasks: number;
 }
 
 const DAY_CODES = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
@@ -67,8 +84,9 @@ interface RawEvent {
   utc: boolean;
 }
 
-function extractEvents(lines: string[]): RawEvent[] {
+function extractEvents(lines: string[]): { events: RawEvent[]; todoCount: number } {
   const events: RawEvent[] = [];
+  let todoCount = 0;
   let cur: Partial<RawEvent> | null = null;
   let exdates: string[] = [];
 
@@ -137,7 +155,14 @@ function extractEvents(lines: string[]): RawEvent[] {
     }
   }
   flush();
-  return events;
+
+  // Google Tasks can ride along in the feed as VTODO. Count them so the UI can
+  // explain what was skipped rather than leaving the user to guess.
+  for (const raw of lines) {
+    if (raw.trim() === 'BEGIN:VTODO') todoCount++;
+  }
+
+  return { events, todoCount };
 }
 
 // ------------------------------------------------------------------ date math
@@ -229,10 +254,11 @@ function matches(date: Date, rule: RRule, origin: Date): boolean {
 // ----------------------------------------------------------------- public API
 
 export function parseIcs(text: string, opts: IcsOptions): ParseResult {
-  const events = extractEvents(unfold(text));
+  const { events, todoCount } = extractEvents(unfold(text));
   const winStart = new Date(`${opts.windowStart}T00:00:00Z`);
   const winEnd = new Date(`${opts.windowEnd}T23:59:59Z`);
   const expanded = new Map<string, ParsedCommitment & { dates: Set<string> }>();
+  const oneOffs: ParsedCommitment[] = [];
   const allDay: ParsedAllDay[] = [];
 
   for (const ev of events) {
@@ -255,44 +281,85 @@ export function parseIcs(text: string, opts: IcsOptions): ParseResult {
     const rule = ev.rrule ? parseRRule(ev.rrule, opts.tzOffsetMinutes) : null;
     const exdates = new Set(ev.exdates.map((x) => x.slice(0, 8)));
 
-    let emitted = 0;
-    const limit = rule?.count ?? 400;
+    // 1. Walk the recurrence and collect every occurrence inside the window.
+    const occurrences: { date: string; start: string; end: string }[] = [];
     const horizon = rule?.until && rule.until < winEnd ? rule.until : winEnd;
+    let produced = 0;
+    let exhausted = false;
 
-    for (let d = origin; d.getTime() <= horizon.getTime() && emitted < limit; d = addDaysUTC(d, 1)) {
-      if (d.getTime() < winStart.getTime()) continue;
+    for (let d = origin; d.getTime() <= horizon.getTime(); d = addDaysUTC(d, 1)) {
       if (rule && !matches(d, rule, origin)) continue;
       if (exdates.has(iso(d).replace(/-/g, ''))) continue;
-      emitted += 1;
-
-      const start = timeOf(d);
-      const endDate = new Date(d.getTime() + durationMs);
-      const end = timeOf(endDate);
-      const key = `${ev.uid}|${ev.summary}|${start}|${end}`;
-      const existing = expanded.get(key);
-      if (existing) {
-        existing.dates.add(iso(d));
-        existing.occurrences += 1;
-      } else {
-        expanded.set(key, {
-          uid: ev.uid,
-          title: ev.summary,
-          start,
-          end,
-          days: [],
-          occurrences: 1,
-          dates: new Set([iso(d)]),
+      produced += 1;
+      if (d.getTime() >= winStart.getTime()) {
+        occurrences.push({
+          date: iso(d),
+          start: timeOf(d),
+          end: timeOf(new Date(d.getTime() + durationMs)),
         });
       }
-      // A one-off event exists exactly once — don't walk the rest of the window.
       if (!rule) break;
+      if (rule.count !== null && produced >= rule.count) {
+        // Every occurrence of a COUNT-limited rule has been seen, so the whole
+        // series is known — no need to generalise it into a weekly block.
+        exhausted = true;
+        break;
+      }
+      if (produced >= 400) break; // safety bound for unbounded rules
+    }
+
+    if (occurrences.length === 0) continue;
+
+    // 2. A rule that runs past our window must repeat; one that ends inside it
+    //    is really a finite list of specific dates.
+    const bounded = !rule || exhausted || (rule.until !== null && rule.until.getTime() < winEnd.getTime());
+
+    if (bounded) {
+      for (const o of occurrences) {
+        oneOffs.push({
+          uid: ev.uid,
+          title: ev.summary,
+          start: o.start,
+          end: o.end,
+          days: [],
+          recurring: false,
+          date: o.date,
+          occurrences: 1,
+        });
+      }
+      continue;
+    }
+
+    // 3. Genuinely repeating: collapse to a weekday set.
+    const first = occurrences[0];
+    const key = `${ev.uid}|${ev.summary}|${first.start}|${first.end}`;
+    const existing = expanded.get(key);
+    const dates = new Set(occurrences.map((o) => o.date));
+    if (existing) {
+      dates.forEach((x) => existing.dates.add(x));
+      existing.occurrences += occurrences.length;
+    } else {
+      expanded.set(key, {
+        uid: ev.uid,
+        title: ev.summary,
+        start: first.start,
+        end: first.end,
+        days: [],
+        recurring: true,
+        date: undefined,
+        occurrences: occurrences.length,
+        dates,
+      });
     }
   }
 
-  const commitments = [...expanded.values()].map((e) => {
+  const recurring = [...expanded.values()].map((e) => {
     const days = [...new Set([...e.dates].map((s) => new Date(`${s}T00:00:00Z`).getUTCDay()))].sort();
-    return { uid: e.uid, title: e.title, start: e.start, end: e.end, days, occurrences: e.occurrences };
+    const { dates: _dates, ...rest } = e;
+    return { ...rest, days, date: undefined };
   });
+
+  const commitments = [...recurring, ...oneOffs].sort((a, b) => a.start.localeCompare(b.start));
 
   // Collapse repeated all-day events so a 277-event holiday calendar stays readable.
   const allDaySeen = new Map<string, ParsedAllDay & { count: number }>();
@@ -310,6 +377,7 @@ export function parseIcs(text: string, opts: IcsOptions): ParseResult {
   return {
     commitments,
     allDay: [...allDaySeen.values()].sort((a, b) => a.start.localeCompare(b.start)),
+    tasks: todoCount,
   };
 }
 
