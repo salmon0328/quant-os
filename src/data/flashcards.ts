@@ -43,6 +43,8 @@ export function mergeDeck(seeds: FlashcardSeed[], progress: Record<string, CardP
       lastReviewed: p?.lastReviewed,
       timesSeen: p?.timesSeen ?? 0,
       timesCorrect: p?.timesCorrect ?? 0,
+      page: s.page,
+      confidence: s.confidence,
     };
   });
 }
@@ -62,32 +64,83 @@ export function gradeCard(prev: CardProgress | undefined, remembered: boolean): 
 export type DeckFilter = 'all' | 'due' | 'new' | 'high';
 
 /** Build today's queue: due first, then unseen, then thinnest coverage. */
-export function buildQueue(cards: Flashcard[], filter: DeckFilter, limit: number, date = today()): Flashcard[] {
-  const due = cards.filter((c) => c.nextReview <= date);
-  const unseen = cards.filter((c) => c.timesSeen === 0);
-
-  let pool: Flashcard[];
+function matchesFilter(c: Flashcard, filter: DeckFilter, date: string): boolean {
   switch (filter) {
     case 'due':
-      pool = due;
-      break;
+      return c.nextReview <= date;
     case 'new':
-      pool = unseen;
-      break;
+      return c.timesSeen === 0;
     case 'high':
-      pool = cards.filter((c) => c.quality === 'high' && c.nextReview <= date);
-      break;
+      return c.quality === 'high' && c.nextReview <= date;
     default:
-      pool = [...due, ...unseen.filter((c) => !due.includes(c))];
+      return c.nextReview <= date || c.timesSeen === 0;
   }
+}
+
+export interface TopicGroup {
+  deck: string;
+  section: string;
+  count: number;
+}
+
+/**
+ * Topics in the order they appear in the source books, so the UI can present
+ * them top-to-bottom (intro -> advanced) the way the author sequenced them.
+ */
+export function topicsOf(cards: Flashcard[]): TopicGroup[] {
+  const byKey = new Map<string, TopicGroup>();
+  for (const c of cards) {
+    const key = `${c.deck}::${c.section}`;
+    const group = byKey.get(key);
+    if (group) group.count += 1;
+    else byKey.set(key, { deck: c.deck, section: c.section, count: 1 });
+  }
+  return [...byKey.values()];
+}
+
+/**
+ * Build today's queue.
+ *  - order 'sequential' (default): walk the deck top-to-bottom so intro -> advanced
+ *    topics stay in their authored reading order.
+ *  - order 'shuffle': randomise for mixed recall practice.
+ *  - topic: restrict to one book topic (card.section), e.g. "Intrinsic Valuation".
+ */
+export function buildQueue(
+  cards: Flashcard[],
+  filter: DeckFilter,
+  limit: number,
+  date = today(),
+  order: 'sequential' | 'shuffle' = 'sequential',
+  topic?: string
+): Flashcard[] {
+  const scoped = topic ? cards.filter((c) => c.section === topic) : cards;
+  let pool = scoped.filter((c) => matchesFilter(c, filter, date));
 
   if (pool.length === 0) {
     // Nothing is due — revision beats idling, so review the weakest cards.
-    pool = [...cards].sort(
-      (a, b) => (a.timesCorrect / Math.max(1, a.timesSeen)) - (b.timesCorrect / Math.max(1, b.timesSeen))
+    pool = [...scoped].sort(
+      (a, b) => a.timesCorrect / Math.max(1, a.timesSeen) - b.timesCorrect / Math.max(1, b.timesSeen)
     );
   }
 
-  // Deterministic-ish shuffle so the same cards don't always come first.
-  return [...pool].sort(() => Math.random() - 0.5).slice(0, limit);
+  if (order === 'shuffle') {
+    return [...pool].sort(() => Math.random() - 0.5).slice(0, limit);
+  }
+  // Sequential: honour the deck's authored top-to-bottom order (intro -> advanced).
+  return pool.slice(0, limit);
+}
+
+/**
+ * Position of a card within its own topic, for a "Book > Topic > 12/48"
+ * breadcrumb while drilling.
+ */
+export function positionIn(cards: Flashcard[], id: string): { topic: string; index: number; total: number } {
+  const card = cards.find((c) => c.id === id);
+  if (!card) return { topic: '', index: 0, total: 0 };
+  const siblings = cards.filter((c) => c.section === card.section);
+  return {
+    topic: card.section,
+    index: siblings.findIndex((c) => c.id === id) + 1,
+    total: siblings.length,
+  };
 }

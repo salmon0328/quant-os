@@ -1,0 +1,209 @@
+{
+  "kept": 749,
+  "dropped": [
+    {
+      "deck": "IB Interview Guide (WSP)",
+      "page": 16,
+      "question": "What are the typical line items you might find on the balance sheet?",
+      "reason": "no_answer_text"
+    },
+    {
+      "deck": "IB Interview Guide (WSP)",
+      "page": 30,
+      "question": "How would you forecast working capital line items on the balance sheet?",
+      "reason": "no_answer_text"
+    },
+    {
+      "deck": "IB Interview Guide (WSP)",
+      "page": 77,
+      "question": "Contrast asset sales vs. 338(h)(10) election vs. stock sales.",
+      "reason": "no_answer_text"
+    },
+    {
+      "deck": "IB Interview Guide (WSP)",
+      "page": 187,
+      "question": "What are some ways that software companies can grow their recurring revenue?",
+      "reason": "no_answer_text"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 37,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 40,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 53,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 55,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 59,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 61,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 63,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 87,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 90,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 90,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 97,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 98,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 98,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 146,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 146,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 148,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 152,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 155,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 160,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 168,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 172,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 173,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 193,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 194,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 194,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 204,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 204,
+      "question": "",
+      "reason": "question_too_short"
+    },
+    {
+      "deck": "IB 400 Questions (BIWS)",
+      "page": 26,
+      "question": "Let's say a company has 100 shares outstanding, at a share price of $10 each. It also has 10 options outstanding at an exercise price of $15 each - what is its fully diluted equity value?",
+      "reason": "duplicate"
+    },
+    {
+      "deck": "IB 400 Questions (BIWS)",
+      "page": 49,
+      "question": "Walk me through a DCF.",
+      "reason": "duplicate"
+    },
+    {
+      "deck": "Quant Finance Interviews (Zhou)",
+      "page": 133,
+      "question": "Dice game Suppose that you roll a dice. For each roll, you are paid the face value. If a roll gives 4, 5 or 6, you can roll the dice again. If you get 1, 2 or 3, the game stops. What is the expected payoff of this game?",
+      "reason": "duplicate"
+    }
+  ]
+}

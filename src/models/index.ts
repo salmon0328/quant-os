@@ -139,6 +139,65 @@ export interface KnowledgeEntry {
   srsStage: number; // spaced-repetition stage index
 }
 
+// ---------------------------------------------------------------------------
+// Learn: structured lessons generated from books / sites / credible sources
+// ---------------------------------------------------------------------------
+
+export type LessonDifficulty = 'beginner' | 'intermediate' | 'advanced';
+
+export interface PracticeQuestion {
+  q: string;
+  a: string;
+}
+
+export interface LessonSource {
+  label: string;
+  url?: string;
+  note?: string;
+}
+
+export interface VideoLink {
+  title: string;
+  url: string; // YouTube or other
+  minutes?: number;
+}
+
+export interface Lesson {
+  id: string;
+  trackId: PillarId;        // matches a pillar in LEARNING_TRACKS
+  title: string;
+  summary: string;          // one-line overview
+  difficulty: LessonDifficulty;
+  tags: string[];
+  elaboration: string;      // long-form teaching text (markdown-ish / newlines)
+  keyNotes: string[];       // bullet-point takeaways
+  practice: PracticeQuestion[];
+  videos: VideoLink[];
+  sources: LessonSource[];
+  estMinutes: number;
+  order: number;            // position within track (top-to-bottom)
+  createdAt?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Aptitude Lab - the speed/pattern drills proprietary trading screens use
+// (the "80 questions in 8 minutes" style test, number series, reaction time)
+// ---------------------------------------------------------------------------
+
+export type AptitudeKind = 'blitz' | 'patterns' | 'reaction' | 'wordle';
+
+export interface AptitudeScore {
+  id: string;
+  kind: AptitudeKind;
+  /** Correct answers for blitz/patterns; 1 when a wordle was solved; 0 for reaction. */
+  score: number;
+  /** Items attempted (or trials for reaction). */
+  total: number;
+  /** Elapsed ms. For reaction this is the average reaction time - lower is better. */
+  ms: number;
+  date: string;
+}
+
 export interface MarketJournalEntry {
   id: string;
   date: string;
@@ -268,6 +327,8 @@ export interface AppState {
   resources: Resource[];
   projects: Project[];
   knowledge: KnowledgeEntry[];
+  lessons: Lesson[];
+  aptitudeScores: AptitudeScore[];
   journal: MarketJournalEntry[];
   weeklyReviews: WeeklyReview[];
   monthlyReviews: MonthlyReview[];
@@ -418,10 +479,16 @@ export interface FeedItem {
 
 export interface FlashcardSeed {
   deck: string;
+  /** Topic taken from the book's own structure (chapter / section heading). */
   section: string;
   question: string;
   answer: string;
+  /** 'high' when the layout signal was unambiguous, 'fair' when inferred. */
   quality?: 'high' | 'fair';
+  /** Printed page number in the source book, so any card can be verified. */
+  page?: number;
+  /** Result of the validation pass: whether the Q/A pair looks complete. */
+  confidence?: 'high' | 'medium' | 'low';
 }
 
 export interface Flashcard {
@@ -436,6 +503,8 @@ export interface Flashcard {
   lastReviewed?: string;
   timesSeen: number;
   timesCorrect: number;
+  page?: number;
+  confidence?: 'high' | 'medium' | 'low';
 }
 
 /**

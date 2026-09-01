@@ -1,13 +1,14 @@
 import React, { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type {
   AppState, CardProgress, EnergyMode, FeedItem, FixedBlock, Insight,
-  ScheduleSettings, Task, KnowledgeEntry, DayLog,
+  ScheduleSettings, Task, KnowledgeEntry, DayLog, Lesson,
 } from '../models';
 import { DEFAULT_SCHEDULE } from '../models';
 import { PILLARS } from '../data/pillars';
 import { RESOURCES } from '../data/resources';
 import { PROJECTS } from '../data/projects';
 import { KNOWLEDGE } from '../data/knowledge';
+import { LESSONS } from '../data/lessons';
 import { today, mondayOf, addDays } from '../lib/date';
 import { generateTasks, scheduleExisting } from '../engine/taskGenerator';
 import { scheduleNextReview, initReview } from '../engine/spacedRepetition';
@@ -33,6 +34,8 @@ function buildInitialState(): AppState {
     resources: RESOURCES,
     projects: PROJECTS,
     knowledge: KNOWLEDGE.map(initReview),
+    lessons: LESSONS,
+    aptitudeScores: [],
     journal: [],
     weeklyReviews: [],
     monthlyReviews: [],
@@ -93,12 +96,18 @@ function hydrate(parsed: Partial<AppState>): AppState {
   });
   const extraProjects = (parsed.projects ?? []).filter((p) => !base.projects.some((b) => b.id === p.id));
 
+  // Refresh seed lessons by id, keep any user-authored lessons not in the seeds.
+  const savedLessons = new Map((parsed.lessons ?? []).map((l) => [l.id, l]));
+  const mergedLessons = base.lessons.map((l) => savedLessons.get(l.id) ?? l);
+  const extraLessons = (parsed.lessons ?? []).filter((l) => !base.lessons.some((b) => b.id === l.id));
+
   return {
     ...base,
     ...parsed,
     pillars: parsed.pillars?.length ? parsed.pillars : base.pillars,
     resources: [...mergedResources, ...extraResources],
     projects: [...mergedProjects, ...extraProjects],
+    lessons: [...mergedLessons, ...extraLessons],
     // v2 fields tolerate older payloads.
     schedule: migrateSchedule({ ...base.schedule, ...(parsed.schedule ?? {}) }),
     fixedBlocks: parsed.fixedBlocks ?? base.fixedBlocks,
@@ -202,6 +211,10 @@ interface Ctx {
   addInsight: (i: Insight) => void;
   updateInsight: (i: Insight) => void;
   removeInsight: (id: string) => void;
+  // lessons (Learn tab)
+  addLesson: (l: Lesson) => void;
+  updateLesson: (l: Lesson) => void;
+  removeLesson: (id: string) => void;
 }
 
 const AppCtx = createContext<Ctx | null>(null);
@@ -537,6 +550,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const removeInsight = (id: string) =>
     patch({ insights: (state.insights ?? []).filter((x) => x.id !== id) });
 
+  // ------------------------------------------------------------------ lessons
+
+  const addLesson = (l: Lesson) => patch({ lessons: [...(state.lessons ?? []), l] });
+  const updateLesson = (l: Lesson) =>
+    patch({ lessons: (state.lessons ?? []).map((x) => (x.id === l.id ? l : x)) });
+  const removeLesson = (id: string) =>
+    patch({ lessons: (state.lessons ?? []).filter((x) => x.id !== id) });
+
   // ------------------------------------------------------------------ reset
 
   const reset = () => {
@@ -558,6 +579,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       addFeedItem, setFeedStatus, removeFeedItem,
       setDeckSize, reviewCard, logDrill,
       addInsight, updateInsight, removeInsight,
+      addLesson, updateLesson, removeLesson,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state, syncStatus]

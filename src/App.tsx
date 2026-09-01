@@ -14,6 +14,7 @@ import Inbox from './pages/Inbox';
 import Settings from './pages/Settings';
 import Career from './pages/Career';
 import Knowledge from './pages/Knowledge';
+import Aptitude from './pages/Aptitude';
 import Resources from './pages/Resources';
 import Reviews from './pages/Reviews';
 import Roadmap from './pages/Roadmap';
@@ -60,6 +61,7 @@ function Gate() {
             <Route path="/settings" element={<Settings />} />
             <Route path="/career" element={<Career />} />
             <Route path="/knowledge" element={<Knowledge />} />
+            <Route path="/aptitude" element={<Aptitude />} />
             <Route path="/resources" element={<Resources />} />
             <Route path="/reviews" element={<Reviews />} />
             <Route path="/roadmap" element={<Roadmap />} />

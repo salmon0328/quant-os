@@ -5,7 +5,7 @@ import type { Flashcard, KnowledgeEntry } from '../models';
 import { dueForReview, srsActionFor, SRS_INTERVALS } from '../engine/spacedRepetition';
 import { today, daysBetween } from '../lib/date';
 import { uid } from '../lib/id';
-import { buildQueue, loadDeck, mergeDeck, type DeckFilter } from '../data/flashcards';
+import { buildQueue, loadDeck, mergeDeck, topicsOf, positionIn, type DeckFilter, type TopicGroup } from '../data/flashcards';
 
 const empty: KnowledgeEntry = {
   id: '', concept: '', category: 'Finance', definition: '', intuition: '', formula: '', example: '', commonMistake: '', related: [], srsStage: 0, nextReview: today(),
@@ -20,7 +20,7 @@ const FILTERS: { key: DeckFilter; label: string }[] = [
 
 export default function Knowledge() {
   const { state, patch, reviewKnowledge, reviewCard, setDeckSize, logDrill } = useApp();
-  const [mode, setMode] = useState<'drill' | 'cards'>('drill');
+  const [mode, setMode] = useState<'drill' | 'cards' | 'quiz'>('drill');
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<KnowledgeEntry | null>(null);
   const [view, setView] = useState<KnowledgeEntry | null>(null);
@@ -45,6 +45,7 @@ export default function Knowledge() {
         <div className="flex gap-1.5">
           <button onClick={() => setMode('drill')} className={`chip ${mode === 'drill' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>Drill</button>
           <button onClick={() => setMode('cards')} className={`chip ${mode === 'cards' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>Concepts</button>
+          <button onClick={() => setMode('quiz')} className={`chip ${mode === 'quiz' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>Quiz</button>
         </div>
       </div>
 
@@ -56,6 +57,8 @@ export default function Knowledge() {
           progress={state.cardProgress}
           deckSize={state.deckSize}
         />
+      ) : mode === 'quiz' ? (
+        <Quiz knowledge={state.knowledge} onReview={reviewKnowledge} />
       ) : (
         <>
           {due.length > 0 && (
@@ -138,6 +141,105 @@ export default function Knowledge() {
   );
 }
 
+// ----------------------------------------------------------- type-answer quiz
+
+function Quiz({
+  knowledge, onReview,
+}: {
+  knowledge: KnowledgeEntry[];
+  onReview: (id: string, remembered: boolean) => void;
+}) {
+  const [scope, setScope] = useState<'due' | 'all'>('due');
+  const [queue, setQueue] = useState<KnowledgeEntry[]>([]);
+  const [i, setI] = useState(0);
+  const [typed, setTyped] = useState('');
+  const [revealed, setRevealed] = useState(false);
+
+  const start = () => {
+    const pool = scope === 'due' ? knowledge.filter((e) => (e.nextReview ?? '') <= today()) : [...knowledge];
+    const ordered = pool.sort((a, b) => a.srsStage - b.srsStage || a.concept.localeCompare(b.concept));
+    setQueue(ordered);
+    setI(0);
+    setTyped('');
+    setRevealed(false);
+  };
+
+  const advance = (remembered: boolean) => {
+    const e = queue[i];
+    if (e) onReview(e.id, remembered);
+    if (i + 1 >= queue.length) {
+      setQueue([]);
+      return;
+    }
+    setI(i + 1);
+    setTyped('');
+    setRevealed(false);
+  };
+
+  if (queue.length === 0) {
+    const dueCount = knowledge.filter((e) => (e.nextReview ?? '') <= today()).length;
+    return (
+      <Card>
+        <SectionTitle>Active recall — type the answer</SectionTitle>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          Recall from memory, type it out, then reveal the model answer and grade yourself.
+          {scope === 'due' ? ` ${dueCount} concept(s) due for review.` : ` ${knowledge.length} concept(s) in the deck.`}
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <div className="flex gap-1.5">
+            <button onClick={() => setScope('due')} className={`chip ${scope === 'due' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>Due only</button>
+            <button onClick={() => setScope('all')} className={`chip ${scope === 'all' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>All</button>
+          </div>
+          <button className="btn-primary ml-auto" onClick={start} disabled={knowledge.length === 0}>Start quiz</button>
+        </div>
+      </Card>
+    );
+  }
+
+  const e = queue[i];
+  const hint = typed.trim().length > 0 && e.definition.toLowerCase().includes(typed.trim().toLowerCase().slice(0, 10));
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between text-xs text-slate-400">
+        <span>Concept {i + 1} of {queue.length}</span>
+        <Chip>{e.category}</Chip>
+      </div>
+      <Card className="min-h-[200px]">
+        <div className="label">Define</div>
+        <div className="text-lg font-semibold leading-snug">{e.concept}</div>
+        <textarea
+          className="input mt-3 w-full"
+          rows={4}
+          placeholder="Type your answer from memory…"
+          value={typed}
+          onChange={(ev) => setTyped(ev.target.value)}
+        />
+        {revealed ? (
+          <div className="mt-3 space-y-2 rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-700 dark:bg-slate-800/60 dark:text-slate-200">
+            {e.definition && <div><span className="font-semibold">Definition:</span> {e.definition}</div>}
+            {e.intuition && <div><span className="font-semibold">Intuition:</span> {e.intuition}</div>}
+            {e.formula && <div className="font-mono text-xs"><span className="font-semibold">Formula:</span> {e.formula}</div>}
+            {e.example && <div><span className="font-semibold">Example:</span> {e.example}</div>}
+          </div>
+        ) : (
+          <div className="mt-3 text-xs text-slate-400">
+            {hint ? 'On the right track — reveal to compare.' : 'Reveal the model answer when ready to self-grade.'}
+          </div>
+        )}
+      </Card>
+      {revealed ? (
+        <div className="flex gap-2">
+          <button className="btn-ghost flex-1 text-red-500" onClick={() => advance(false)}>Forgot</button>
+          <button className="btn-primary flex-1" onClick={() => advance(true)}>Remembered</button>
+        </div>
+      ) : (
+        <button className="btn-primary w-full" onClick={() => setRevealed(true)}>Reveal answer</button>
+      )}
+    </div>
+  );
+}
+
 // --------------------------------------------------------------------- drill
 
 function Drill({
@@ -152,6 +254,8 @@ function Drill({
   const [seeds, setSeeds] = useState<Flashcard[] | null>(null);
   const [filter, setFilter] = useState<DeckFilter>('all');
   const [size, setSize] = useState(8);
+  const [shuffle, setShuffle] = useState(false);
+  const [topic, setTopic] = useState('');
   const [queue, setQueue] = useState<Flashcard[]>([]);
   const [i, setI] = useState(0);
   const [revealed, setRevealed] = useState(false);
@@ -174,7 +278,7 @@ function Drill({
   const start = async () => {
     const loaded = await ensureDeck();
     const merged = mergeDeck(loaded.map(toSeed), progress);
-    const next = buildQueue(merged, filter, size);
+    const next = buildQueue(merged, filter, size, today(), shuffle ? 'shuffle' : 'sequential', topic || undefined);
     setQueue(next);
     setI(0);
     setRevealed(false);
@@ -210,6 +314,18 @@ function Drill({
   }, [progress, cards, deckSize]);
 
   const card = queue[i];
+
+  // Topics in the order they appear in the source books.
+  const topics = useMemo<TopicGroup[]>(() => (seeds ? topicsOf(mergeDeck(seeds.map(toSeed), progress)) : []), [seeds, progress]);
+  const groupedTopics = useMemo(() => {
+    const map = new Map<string, TopicGroup[]>();
+    for (const t of topics) {
+      const rows = map.get(t.deck) ?? [];
+      rows.push(t);
+      map.set(t.deck, rows);
+    }
+    return [...map.entries()];
+  }, [topics]);
 
   if (!seeds) {
     return (
@@ -266,11 +382,34 @@ function Drill({
               </button>
             ))}
           </div>
+          {topics.length > 0 && (
+            <div className="mb-3">
+              <label className="mb-1 block text-xs text-slate-500">
+                Topic — as ordered in the book (leave on “All” to walk the whole deck top-to-bottom)
+              </label>
+              <select className="input" value={topic} onChange={(e) => setTopic(e.target.value)}>
+                <option value="">All topics ({stats.total} questions)</option>
+                {groupedTopics.map(([book, rows]) => (
+                  <optgroup key={book} label={book}>
+                    {rows.map((t) => (
+                      <option key={`${t.deck}::${t.section}`} value={t.section}>
+                        {t.section} ({t.count})
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-3">
             <label className="text-xs text-slate-500">Cards per set</label>
             <select className="input w-24" value={size} onChange={(e) => setSize(+e.target.value)}>
               {[5, 8, 12, 20].map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
+            <label className="flex items-center gap-1.5 text-xs text-slate-500" title="Off = walk the deck top-to-bottom (intro → advanced). On = randomise.">
+              <input type="checkbox" checked={shuffle} onChange={(e) => setShuffle(e.target.checked)} />
+              Shuffle
+            </label>
             <button className="btn-primary ml-auto" onClick={start}>Start drill</button>
           </div>
         </Card>
@@ -281,15 +420,30 @@ function Drill({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between text-xs text-slate-400">
-        <span>Card {i + 1} of {queue.length}</span>
+        <span>
+          {(() => {
+            const pos = positionIn(cards, card.id);
+            return (
+              <>
+                {card.deck} › {pos.topic} › {pos.index}/{pos.total}
+                <span className="ml-2 text-slate-500">set {i + 1}/{queue.length}</span>
+              </>
+            );
+          })()}
+        </span>
         <span>{score ? `${score.correct}/${score.total} so far` : 'no score yet'}</span>
       </div>
       <ProgressBar value={(i / queue.length) * 100} />
 
       <Card className="min-h-[220px]">
         <div className="mb-2 flex flex-wrap items-center gap-2">
-          <Chip tone="career">{card.deck}</Chip>
-          {card.quality === 'high' && <Chip tone="ai">clean answer</Chip>}
+          <Chip tone="career">{card.section}</Chip>
+          {card.confidence === 'low' && (
+            <span title="The parser could not recover a complete answer for this one — check the book before trusting it.">
+              <Chip tone="finance">check in book</Chip>
+            </span>
+          )}
+          {card.page ? <span className="text-[10px] text-slate-400">p.{card.page}</span> : null}
           <span className="text-[10px] text-slate-400">stage {card.srsStage}</span>
         </div>
         <div className="text-lg font-semibold leading-snug">{card.question}</div>
@@ -318,7 +472,12 @@ function Drill({
 }
 
 function toSeed(c: Flashcard) {
-  return { deck: c.deck, section: c.section, question: c.question, answer: c.answer, quality: c.quality };
+  // page + confidence must survive the round-trip, otherwise the deck loses the
+  // provenance that lets you check a card against the book.
+  return {
+    deck: c.deck, section: c.section, question: c.question, answer: c.answer,
+    quality: c.quality, page: c.page, confidence: c.confidence,
+  };
 }
 
 function Stat({ label, value, color }: { label: string; value: React.ReactNode; color?: string }) {
