@@ -184,7 +184,25 @@ export interface Lesson {
 // (the "80 questions in 8 minutes" style test, number series, reaction time)
 // ---------------------------------------------------------------------------
 
-export type AptitudeKind = 'blitz' | 'patterns' | 'reaction' | 'wordle';
+/**
+ * Drill types modelled on the categories trading-firm prep sites (e.g. tradermath)
+ * group their assessments into: numerical speed, probability/estimation, and the
+ * cognitive tests firms actually put in front of candidates.
+ */
+export type AptitudeKind =
+  | 'blitz'        // 80 arithmetic questions in 8 minutes (Optiver)
+  | 'patterns'     // number series, find the next term
+  | 'fractions'    // fraction -> decimal conversions, instant recall
+  | 'probability'  // timed probability / expected value
+  | 'fermi'        // order-of-magnitude estimation
+  | 'brainteaser'  // classic quant brainteasers, multiple choice
+  | 'taskswitch'   // Zap-N style: the rule flips, you must keep up
+  | 'pincode'      // digit span: forward / reverse / sorted
+  | 'gridrecall'   // spatial working memory with decoy cells
+  | 'flanker'      // response inhibition: act on the centre, ignore the flanks
+  | 'holdfire'     // go / no-go with a cue rule that keeps changing
+  | 'reaction'     // simple reaction time
+  | 'wordle';      // pattern elimination
 
 export interface AptitudeScore {
   id: string;
