@@ -1,4 +1,4 @@
-import type { AppState, EnergyMode, FeedItem, Task, TaskCategory, PillarId } from '../models';
+import type { AppState, EnergyMode, FeedItem, Task, TaskCategory, PillarId, TrackId } from '../models';
 import { DEFAULT_SCHEDULE } from '../models';
 import { weekForIndex } from '../data/curriculum';
 import { weekIndexFrom, dayOfWeek, daysBetween } from '../lib/date';
@@ -6,6 +6,10 @@ import { dueForReview, srsActionFor } from './spacedRepetition';
 import { recentCompletionRate } from './profile';
 import { assignTimes, freeSlots, isCampusDay } from './scheduler';
 import { TASK_KIND_BY_ID, minutesFor, type TaskKind, type TaskKindId } from '../data/cadence';
+import { cursorFor, nextItem, nextItems } from './tracks';
+import { LEETCODE, leetcodeUrl, neetcodeUrl } from '../data/tracks/leetcode';
+import { TERMINAL } from '../data/tracks/bloomberg';
+import { READING } from '../data/tracks/reading';
 
 export const ENERGY_BUDGET: Record<EnergyMode, number> = {
   low: 45, // minimum viable day
@@ -45,19 +49,10 @@ interface Spec {
   prefer?: 'morning' | 'midday' | 'evening';
   micro?: boolean;
   rank: number;
-}
-
-const LEETCODE_PATTERNS = [
-  'arrays', 'hash maps', 'strings', 'two pointers', 'sliding window',
-  'binary search', 'stacks', 'queues', 'heaps', 'trees', 'graphs', 'dynamic programming',
-];
-
-/**
- * Patterns advance by week rather than being drawn at random, so the same
- * pattern never reappears two sessions in a row and progress is visible.
- */
-function leetcodePattern(weekIdx: number): string {
-  return LEETCODE_PATTERNS[Math.max(0, weekIdx - 1) % LEETCODE_PATTERNS.length];
+  trackId?: TrackId;
+  trackItemId?: string;
+  steps?: string[];
+  links?: { label: string; url: string }[];
 }
 
 // -------------------------------------------------------------------- inputs
@@ -138,20 +133,85 @@ function buildSpec(state: AppState, minutes: number): Spec {
   };
 }
 
-function codingSpec(weekIdx: number, minutes: number): Spec {
-  const pat = leetcodePattern(weekIdx);
+/**
+ * Names the actual next two problems rather than a pattern. Premium problems
+ * are skipped by default — a task you cannot open is worse than no task.
+ */
+function codingSpec(state: AppState, minutes: number): Spec {
+  const cursor = cursorFor(state, 'leetcode');
+  const picks = nextItems(LEETCODE, cursor, 2, (p) => !p.premium);
+
+  if (picks.length === 0) {
+    return {
+      kind: 'coding', pillar: 'programming', category: 'technical',
+      title: 'LeetCode — roadmap complete, pick a weak pattern to revisit',
+      why: 'You have worked through the NeetCode 150. Revision beats new volume now.',
+      minutes,
+      output: 'Re-solve two problems you originally failed, from memory.',
+      priority: 'core', prefer: 'midday',
+      rank: TASK_KIND_BY_ID.get('coding')!.rank,
+    };
+  }
+
+  const pattern = picks[0].pattern;
+  const titles = picks.map((p) => p.title).join(' + ');
+  const done = cursor.completedIds.length;
+
   return {
     kind: 'coding',
     pillar: 'programming',
     category: 'technical',
-    title: `LeetCode — ${pat} (2 problems)`,
-    why: 'Optimise for understanding, not count.',
+    title: `LeetCode — ${titles}`,
+    why: `${pattern} · ${picks.map((p) => p.difficulty).join('/')} · ${done}/${LEETCODE.length} of the NeetCode 150 done.`,
     minutes,
-    resourceId: 'neetcode',
-    output: `Solve 2 ${pat} problems; write a 3-line explanation of the pattern.`,
+    output: `Solve both, then write three lines on what makes this a ${pattern} problem.`,
     priority: 'core',
     prefer: 'midday',
     rank: TASK_KIND_BY_ID.get('coding')!.rank,
+    trackId: 'leetcode',
+    // Only the first is the cursor anchor; the second is credited alongside it
+    // when the task is ticked (see completeTaskTrack).
+    trackItemId: picks.map((p) => p.id).join(','),
+    links: picks.flatMap((p) => [
+      { label: `${p.title} (LeetCode)`, url: leetcodeUrl(p) },
+      { label: `${p.title} (NeetCode walkthrough)`, url: neetcodeUrl(p) },
+    ]),
+  };
+}
+
+/** One book chapter, in order, with its concepts named. */
+function theorySpec(state: AppState, minutes: number): Spec {
+  const cursor = cursorFor(state, 'reading');
+  const unit = nextItem(READING, cursor);
+  const rank = TASK_KIND_BY_ID.get('theory')!.rank;
+
+  if (!unit) {
+    return {
+      kind: 'theory', pillar: 'finance', category: 'finance',
+      title: 'Reading — pick your next book in Books',
+      why: 'Every chapter in the tracked books is done.',
+      minutes,
+      output: 'Choose the next book and add it to the shelf.',
+      priority: 'core', prefer: 'evening', rank,
+    };
+  }
+
+  const shortBook = unit.bookLabel.split('—')[0].trim();
+  return {
+    kind: 'theory',
+    pillar: 'finance',
+    category: 'finance',
+    title: `Read — ${shortBook} Ch.${unit.chapter}: ${unit.title}`,
+    why: `Covers ${unit.concepts.slice(0, 3).join(', ')}. ${cursor.completedIds.length}/${READING.length} chapters done.`,
+    minutes: Math.max(minutes, Math.min(unit.estMinutes, 60)),
+    resourceHint: `${unit.bookLabel}, chapter ${unit.chapter}`,
+    output: 'Three lines: the central idea, the formula or mechanism, and one thing you did not follow.',
+    priority: 'core',
+    prefer: 'evening',
+    rank,
+    trackId: 'reading',
+    trackItemId: unit.id,
+    steps: unit.concepts.map((c) => `Be able to explain: ${c}`),
   };
 }
 
@@ -211,20 +271,42 @@ function drillSpec(state: AppState, dateISO: string, minutes: number): Spec {
   };
 }
 
-function terminalSpec(minutes: number): Spec {
+/** Names the specific function and the three things to run on it. */
+function terminalSpec(state: AppState, minutes: number): Spec {
+  const cursor = cursorFor(state, 'bloomberg');
+  const fn = nextItem(TERMINAL, cursor);
+  const rank = TASK_KIND_BY_ID.get('terminal')!.rank;
+
+  if (!fn) {
+    return {
+      kind: 'terminal', pillar: 'finance', category: 'finance',
+      title: 'Bloomberg — build something of your own in BQNT',
+      why: 'You have been through the function curriculum; the leverage now is using it in a project.',
+      minutes,
+      output: 'One BQuant notebook that pulls data you could not get elsewhere.',
+      priority: 'optional', location: 'campus', prefer: 'midday', rank,
+    };
+  }
+
+  const prereqs = (fn.buildsOn ?? [])
+    .map((id) => TERMINAL.find((f) => f.id === id)?.mnemonic)
+    .filter(Boolean);
+
   return {
     kind: 'terminal',
     pillar: 'finance',
     category: 'finance',
-    title: 'Bloomberg Terminal — one function, learned properly',
-    why: 'Terminal fluency is a cheap differentiator — most students never touch it.',
-    minutes,
-    resourceId: 'bloomberg-bquant',
-    output: 'Write down the mnemonic + one thing you pulled that you could not get elsewhere.',
+    title: `Bloomberg — ${fn.mnemonic}: ${fn.name}`,
+    why: `${fn.whatItShows}${prereqs.length ? ` Builds on ${prereqs.join(', ')}.` : ''} ${cursor.completedIds.length}/${TERMINAL.length} functions learned.`,
+    minutes: Math.max(minutes, Math.min(fn.estMinutes, 45)),
+    output: `Work through all three steps and note what ${fn.mnemonic} gave you that you could not get elsewhere.`,
     priority: 'optional',
     location: 'campus',
     prefer: 'midday',
-    rank: TASK_KIND_BY_ID.get('terminal')!.rank,
+    rank,
+    trackId: 'bloomberg',
+    trackItemId: fn.id,
+    steps: fn.tryThis,
   };
 }
 
@@ -278,6 +360,10 @@ function specToTask(dateISO: string, s: Spec): Task {
     generated: true,
     location: s.location ?? 'anywhere',
     prefer: s.prefer,
+    trackId: s.trackId,
+    trackItemId: s.trackItemId,
+    steps: s.steps,
+    links: s.links,
     // Stable id: a cadence task keeps the same id across regenerations, so
     // completing it once isn't undone by re-running the generator.
   };
@@ -348,7 +434,10 @@ export function generateTasks(
   if (onDay(build)) candidates.push(buildSpec(state, mins(build)));
 
   const coding = TASK_KIND_BY_ID.get('coding')!;
-  if (onDay(coding)) candidates.push(codingSpec(weekIdx, mins(coding)));
+  if (onDay(coding)) candidates.push(codingSpec(state, mins(coding)));
+
+  const theory = TASK_KIND_BY_ID.get('theory')!;
+  if (onDay(theory)) candidates.push(theorySpec(state, mins(theory)));
 
   const deepInput = TASK_KIND_BY_ID.get('deepInput')!;
   if (onDay(deepInput)) candidates.push(deepInputSpec(feed, onCampus, mins(deepInput)));
@@ -357,7 +446,7 @@ export function generateTasks(
   if (onDay(drill)) candidates.push(drillSpec(state, dateISO, mins(drill)));
 
   const terminal = TASK_KIND_BY_ID.get('terminal')!;
-  if (onDay(terminal) && onCampus) candidates.push(terminalSpec(mins(terminal)));
+  if (onDay(terminal) && onCampus) candidates.push(terminalSpec(state, mins(terminal)));
 
   // ----------------------------------------------- fill an empty core slot
   // Weekdays with no rotation task would otherwise be nearly empty. Rather than

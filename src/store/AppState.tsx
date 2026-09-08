@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type {
   AppState, CardProgress, EnergyMode, FeedItem, FixedBlock, Insight,
-  ScheduleSettings, Task, KnowledgeEntry, DayLog, Lesson,
+  ScheduleSettings, Task, TaskStatus, TrackId, KnowledgeEntry, DayLog, Lesson,
 } from '../models';
 import { DEFAULT_SCHEDULE } from '../models';
 import { PILLARS } from '../data/pillars';
@@ -11,6 +11,7 @@ import { KNOWLEDGE } from '../data/knowledge';
 import { LESSONS } from '../data/lessons';
 import { today, mondayOf, addDays } from '../lib/date';
 import { generateTasks, scheduleExisting } from '../engine/taskGenerator';
+import { completeItems, skipItems, uncompleteItems } from '../engine/tracks';
 import { scheduleNextReview, initReview } from '../engine/spacedRepetition';
 import { gradeCard } from '../data/flashcards';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
@@ -197,6 +198,7 @@ interface Ctx {
   regenerateTasks: (date: string) => { notes: string[] };
   rescheduleDay: (date: string) => void;
   toggleTask: (id: string) => void;
+  skipTrackItems: (trackId: TrackId, itemIds: string[]) => void;
   addTask: (t: Task) => void;
   updateTask: (t: Task) => void;
   deleteTask: (id: string) => void;
@@ -396,12 +398,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const toggleTask = (id: string) => {
-    patch({
-      tasks: state.tasks.map((t) =>
-        t.id === id ? { ...t, status: t.status === 'done' ? 'pending' : 'done' } : t
-      ),
-    });
+    const task = state.tasks.find((t) => t.id === id);
+    const nowDone = task?.status !== 'done';
+
+    const tasks = state.tasks.map((t) =>
+      t.id === id ? { ...t, status: (t.status === 'done' ? 'pending' : 'done') as TaskStatus } : t
+    );
+
+    // Ticking a catalogue-backed task advances that track's cursor, which is
+    // what makes tomorrow's task the *next* problem/function/chapter rather
+    // than the same one again. Un-ticking reverses it, so the cursor never
+    // runs ahead of work actually done.
+    if (task?.trackId && task.trackItemId) {
+      const itemIds = task.trackItemId.split(',').filter(Boolean);
+      const trackPatch = nowDone
+        ? completeItems(state, task.trackId, itemIds, task.date)
+        : uncompleteItems(state, task.trackId, itemIds);
+      patch({ tasks, ...trackPatch });
+      return;
+    }
+
+    patch({ tasks });
   };
+
+  /** Pass over catalogue items permanently — they will not be offered again. */
+  const skipTrackItems = (trackId: TrackId, itemIds: string[]) => patch(skipItems(state, trackId, itemIds));
 
   const addTask = (t: Task) => patch({ tasks: [...state.tasks, t] });
   const updateTask = (t: Task) => patch({ tasks: state.tasks.map((x) => (x.id === t.id ? t : x)) });
@@ -584,7 +605,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     () => ({
       state, patch, reset, importState, syncEnabled: isSupabaseConfigured, syncStatus,
       energyFor, setEnergy, ensureTasksForDate, regenerateTasks, rescheduleDay,
-      toggleTask, addTask, updateTask, deleteTask, rescheduleMissed, reviewKnowledge,
+      toggleTask, skipTrackItems, addTask, updateTask, deleteTask, rescheduleMissed, reviewKnowledge,
       updateSchedule, setCadence, syncCalendar, addFixedBlock, updateFixedBlock, removeFixedBlock,
       addFeedItem, setFeedStatus, removeFeedItem,
       setDeckSize, reviewCard, logDrill,
