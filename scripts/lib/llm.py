@@ -1,13 +1,16 @@
-"""OpenRouter client shared by the content-generation scripts.
+"""LLM client shared by the content-generation scripts.
 
 Mirrors api/_lib/llm.ts so the batch scripts and the live route talk to the
-same provider with the same model tiers. Standard library only -- these
-scripts already avoid a requirements.txt beyond pdfplumber.
+same gateway with the same model tiers. Speaks the OpenAI chat/completions
+shape, so it works against 9Router (the local default), OpenRouter, or any
+other OpenAI-compatible endpoint. Standard library only -- these scripts
+already avoid a requirements.txt beyond pdfplumber.
 
 Environment:
-    OPENROUTER_API_KEY      required
-    OPENROUTER_MODEL_FAST   default anthropic/claude-haiku-4.5
-    OPENROUTER_MODEL_SMART  default anthropic/claude-sonnet-5
+    LLM_API_KEY      required
+    LLM_BASE_URL     default http://localhost:20128/v1  (9Router)
+    LLM_MODEL_FAST   default ag/gemini-3.8-flash
+    LLM_MODEL_SMART  default ag/claude-sonnet-4-6
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+DEFAULT_BASE_URL = "http://localhost:20128/v1"
 TIMEOUT_S = 120
 MAX_ATTEMPTS = 5
 
@@ -43,13 +46,18 @@ class Usage:
 
 
 def is_configured() -> bool:
-    return bool(os.environ.get("OPENROUTER_API_KEY"))
+    return bool(os.environ.get("LLM_API_KEY"))
+
+
+def endpoint() -> str:
+    base = os.environ.get("LLM_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+    return f"{base}/chat/completions"
 
 
 def model_for(tier: str) -> str:
     if tier == "smart":
-        return os.environ.get("OPENROUTER_MODEL_SMART", "anthropic/claude-sonnet-5")
-    return os.environ.get("OPENROUTER_MODEL_FAST", "anthropic/claude-haiku-4.5")
+        return os.environ.get("LLM_MODEL_SMART", "ag/claude-sonnet-4-6")
+    return os.environ.get("LLM_MODEL_FAST", "ag/gemini-3.8-flash")
 
 
 def parse_json_loose(raw: str) -> Any:
@@ -113,9 +121,9 @@ def chat(
     batch run will hit rate limits and losing the whole run to one 429 is the
     difference between a script you use and one you don't.
     """
-    key = os.environ.get("OPENROUTER_API_KEY")
+    key = os.environ.get("LLM_API_KEY")
     if not key:
-        raise LlmError("OPENROUTER_API_KEY is not set (see .env.example)")
+        raise LlmError("LLM_API_KEY is not set (see .env.example)")
 
     payload: dict[str, Any] = {
         "model": model or model_for(tier),
@@ -134,7 +142,7 @@ def chat(
 
     for attempt in range(MAX_ATTEMPTS):
         request = urllib.request.Request(
-            ENDPOINT,
+            endpoint(),
             data=body,
             headers={
                 "Authorization": f"Bearer {key}",

@@ -50,7 +50,7 @@ const MAX_PER_WINDOW = 20;
 /**
  * Per-instance, in-memory. A serverless instance is short-lived so this is a
  * guard against a runaway client loop, not a billing control — the real
- * spend cap belongs on the OpenRouter key itself.
+ * spend cap belongs on the gateway/provider key itself.
  */
 const hits = new Map<string, number[]>();
 
@@ -106,7 +106,7 @@ export async function handleAi(
   if (!isLlmConfigured()) {
     return {
       status: 503,
-      body: { ok: false, error: 'AI is not configured on this deployment (OPENROUTER_API_KEY is unset).' },
+      body: { ok: false, error: 'AI is not configured on this deployment (LLM_API_KEY is unset).' },
     };
   }
 

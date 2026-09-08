@@ -1,12 +1,20 @@
 /**
- * OpenRouter client — the single place the app talks to a language model.
+ * LLM client — the single place the app talks to a language model.
  *
- * OpenRouter is OpenAI-compatible, so this is a thin wrapper over one
- * chat/completions call. It lives under api/_lib because OPENROUTER_API_KEY is
- * a server secret: it must never reach the browser bundle.
+ * Provider-agnostic: it speaks the OpenAI chat/completions shape, so it works
+ * against 9Router (the default, running locally on :20128), OpenRouter, or any
+ * other OpenAI-compatible gateway, by changing LLM_BASE_URL alone.
+ *
+ * It lives under api/_lib because LLM_API_KEY is a server secret: it must
+ * never reach the browser bundle.
+ *
+ * NOTE: the default base URL is localhost. A Vercel function cannot reach a
+ * gateway running on your laptop, so a deployed build needs LLM_BASE_URL
+ * pointed at something publicly reachable — otherwise AI features are
+ * local-only and the app hides them (see aiStatus / src/lib/ai.ts).
  */
 
-const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+const DEFAULT_BASE_URL = 'http://localhost:20128/v1';
 const FETCH_TIMEOUT_MS = 45_000;
 
 /** Hard ceiling regardless of what a caller asks for — a runaway loop is expensive. */
@@ -42,14 +50,19 @@ export interface ChatResult {
 }
 
 export function isLlmConfigured(): boolean {
-  return Boolean(process.env.OPENROUTER_API_KEY);
+  return Boolean(process.env.LLM_API_KEY);
+}
+
+function endpoint(): string {
+  const base = (process.env.LLM_BASE_URL || DEFAULT_BASE_URL).replace(/\/+$/, '');
+  return `${base}/chat/completions`;
 }
 
 function modelFor(opts: ChatOptions): string {
   if (opts.model) return opts.model;
   return opts.tier === 'smart'
-    ? process.env.OPENROUTER_MODEL_SMART || 'anthropic/claude-sonnet-5'
-    : process.env.OPENROUTER_MODEL_FAST || 'anthropic/claude-haiku-4.5';
+    ? process.env.LLM_MODEL_SMART || 'ag/claude-sonnet-4-6'
+    : process.env.LLM_MODEL_FAST || 'ag/gemini-3.8-flash';
 }
 
 /**
@@ -89,22 +102,22 @@ export function parseJsonLoose(raw: string): unknown | undefined {
 }
 
 export async function chat(opts: ChatOptions): Promise<ChatResult> {
-  const key = process.env.OPENROUTER_API_KEY;
-  if (!key) return { ok: false, error: 'AI is not configured (OPENROUTER_API_KEY is unset).' };
+  const key = process.env.LLM_API_KEY;
+  if (!key) return { ok: false, error: 'AI is not configured (LLM_API_KEY is unset).' };
 
   const model = modelFor(opts);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
   try {
-    const res = await fetch(ENDPOINT, {
+    const res = await fetch(endpoint(), {
       method: 'POST',
       signal: controller.signal,
       headers: {
         Authorization: `Bearer ${key}`,
         'Content-Type': 'application/json',
-        // OpenRouter uses these for its dashboard attribution; both optional.
-        'HTTP-Referer': process.env.OPENROUTER_SITE_URL || 'https://quant-os.local',
+        // Attribution headers: used by OpenRouter's dashboard, ignored by
+        // gateways that don't know them.
         'X-Title': 'Quant-OS',
       },
       body: JSON.stringify({
@@ -118,7 +131,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
 
     if (!res.ok) {
       const detail = (await res.text().catch(() => '')).slice(0, 300);
-      return { ok: false, error: `OpenRouter returned ${res.status}. ${detail}`.trim(), model };
+      return { ok: false, error: `The model gateway returned ${res.status}. ${detail}`.trim(), model };
     }
 
     const body = (await res.json()) as {
@@ -127,7 +140,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
       error?: { message?: string };
     };
 
-    if (body.error) return { ok: false, error: body.error.message ?? 'Unknown OpenRouter error.', model };
+    if (body.error) return { ok: false, error: body.error.message ?? 'Unknown gateway error.', model };
 
     const text = body.choices?.[0]?.message?.content;
     if (!text) return { ok: false, error: 'The model returned an empty response.', model };
@@ -147,7 +160,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
   } catch (err) {
     const message = err instanceof Error && err.name === 'AbortError'
       ? 'The model took too long to respond.'
-      : err instanceof Error ? err.message : 'Request to OpenRouter failed.';
+      : err instanceof Error ? err.message : 'Request to the model gateway failed.';
     return { ok: false, error: message, model };
   } finally {
     clearTimeout(timer);

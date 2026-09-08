@@ -749,7 +749,7 @@ def repair_pass(cards: list[dict], model: str | None, limit: int) -> int:
         print("  nothing needs repairing")
         return 0
     if not llm.is_configured():
-        print("  ! OPENROUTER_API_KEY is not set - skipping the repair pass")
+        print("  ! LLM_API_KEY is not set - skipping the repair pass")
         return 0
 
     model = model or llm.model_for("smart")
@@ -824,7 +824,7 @@ def main() -> int:
     ap.add_argument("--report", action="store_true", help="write scripts/qa_report.json")
     ap.add_argument("--repair", action="store_true", help="send low-confidence cards to an LLM")
     ap.add_argument("--model", default=None,
-                    help="OpenRouter model id for --repair (default: $OPENROUTER_MODEL_SMART)")
+                    help="model id for --repair (default: $LLM_MODEL_SMART)")
     ap.add_argument("--limit", type=int, default=0, help="max cards to repair")
     args = ap.parse_args()
 
