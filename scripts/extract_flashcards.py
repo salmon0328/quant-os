@@ -9,7 +9,7 @@ Run from the project root:
     python3 scripts/extract_flashcards.py --sample 3   # show sample cards
     python3 scripts/extract_flashcards.py --only 400   # one source only
     python3 scripts/extract_flashcards.py --report     # every dropped question + reason
-    python3 scripts/extract_flashcards.py --repair     # send low-confidence cards to Gemini
+    python3 scripts/extract_flashcards.py --repair     # send low-confidence cards to an LLM
 
 --------------------------------------------------------------------------
 Why this was rewritten
@@ -32,7 +32,7 @@ This version separates the three jobs:
                       and the book's own Table of Contents gives topic-by-page.
   B. VALIDATION - every card is checked and tagged high/medium/low, so you can
        see what to trust instead of discovering it during an interview.
-  C. REPAIR (optional) - --repair sends only low-confidence cards to Gemini to
+  C. REPAIR (optional) - --repair sends only low-confidence cards to an LLM to
        clean the answer and confirm the topic.
 
 Every card carries `page` so you can check it against the book, and nothing is
@@ -47,9 +47,13 @@ import json
 import os
 import re
 import sys
-import urllib.request
 from collections import Counter
 from dataclasses import dataclass, field
+from pathlib import Path
+
+# Run from anywhere: the shared OpenRouter client lives beside this file.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib import llm  # noqa: E402
 
 from pdfplumber import open as pdf_open
 
@@ -712,76 +716,70 @@ def parse_text_file(path: str, deck: str, quality: str, dropped: list):
 
 
 # ---------------------------------------------------------------------------
-# Gemini repair pass (layer C) - stdlib only, no extra dependency
+# LLM repair pass (layer C) - via OpenRouter, see scripts/lib/llm.py
 # ---------------------------------------------------------------------------
 
-GEMINI_URL = ("https://generativelanguage.googleapis.com/v1beta/models/"
-              "{model}:generateContent?key={key}")
+REPAIR_SYSTEM = """You repair flashcards whose answers were extracted from an interview book by a PDF parser. The parser often drops table or callout text mid-sentence, leaving the answer incomplete.
 
-REPAIR_PROMPT = """You are repairing a flashcard whose answer was extracted from an investment-banking interview book by a PDF parser. The parser often drops table or callout text in the middle of a sentence, leaving the answer incomplete.
+Rules:
+- Use ONLY facts present in the supplied page text. Do not add outside knowledge.
+- Recover the missing part from the page text where it exists.
+- Drop sidebar/video/callout padding that does not answer the question.
+- Plain prose. No preamble, no markdown, no bullet characters.
+- End with a full stop.
 
-QUESTION: {question}
+Respond with a single JSON object and nothing else:
+{"answer": "the repaired answer", "ok": true}
+If the page text genuinely does not answer the question, respond {"answer": "", "ok": false}."""
+
+REPAIR_USER = """QUESTION: {question}
 
 CURRENT (INCOMPLETE) ANSWER:
 {answer}
 
 FULL TEXT OF THE RELEVANT BOOK PAGE(S):
-{raw}
-
-Task: return a complete, self-contained answer to the question.
-
-Rules:
-- Use ONLY facts present in the page text above. Do not add outside knowledge.
-- Recover the missing part from the page text where it exists.
-- Drop sidebar/video/callout padding that does not answer the question.
-- Plain prose, no preamble, no markdown, no bullet characters.
-- Must end with a full stop.
-- If the page text genuinely does not answer the question, reply with exactly: SKIP
-"""
+{raw}"""
 
 
-def gemini(prompt: str, model: str = "gemini-2.5-flash") -> str | None:
-    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if not key:
-        return None
-    body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode()
-    req = urllib.request.Request(
-        GEMINI_URL.format(model=model, key=key),
-        data=body, headers={"Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=90) as r:
-            data = json.load(r)
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception as e:  # never let one bad call abort the run
-        print(f"    ! gemini error: {e}")
-        return None
-
-
-def repair_pass(cards: list[dict], model: str, limit: int) -> int:
+def repair_pass(cards: list[dict], model: str | None, limit: int) -> int:
     targets = [c for c in cards if c.get("confidence") == "low"]
     if limit:
         targets = targets[:limit]
     if not targets:
         print("  nothing needs repairing")
         return 0
+    if not llm.is_configured():
+        print("  ! OPENROUTER_API_KEY is not set - skipping the repair pass")
+        return 0
+
+    model = model or llm.model_for("smart")
     print(f"  repairing {len(targets)} low-confidence card(s) with {model} …")
+    usage = llm.Usage()
     fixed = 0
     for c in targets:
-        out = gemini(REPAIR_PROMPT.format(
-            question=c["question"], answer=c["answer"],
-            raw=(c.get("raw") or c["answer"])[:4000],
-        ), model)
-        if not out:
+        try:
+            out = llm.chat(
+                system=REPAIR_SYSTEM,
+                user=REPAIR_USER.format(
+                    question=c["question"],
+                    answer=c["answer"],
+                    raw=(c.get("raw") or c["answer"])[:4000],
+                ),
+                model=model,
+                max_tokens=900,
+                usage=usage,
+            )
+        except llm.LlmError as e:  # one bad card must not abort the run
+            print(f"    ! {e}")
             continue
-        out = out.strip()
-        if out.upper().startswith("SKIP") or len(out) < MIN_ANSWER:
+        answer = (out.get("answer") or "").strip() if isinstance(out, dict) else ""
+        if not out.get("ok") or len(answer) < MIN_ANSWER:
             continue
-        c["answer"] = clean(out)
+        c["answer"] = clean(answer)
         c["confidence"] = "medium"
         c["repaired"] = True
         fixed += 1
-    print(f"  repaired {fixed}")
+    print(f"  repaired {fixed} (tokens: {usage.prompt} in / {usage.completion} out)")
     return fixed
 
 
@@ -824,8 +822,9 @@ def main() -> int:
     ap.add_argument("--sample", type=int, default=0, help="print N sample cards per source")
     ap.add_argument("--only", default="", help="limit to one source (WSP, 400, Green)")
     ap.add_argument("--report", action="store_true", help="write scripts/qa_report.json")
-    ap.add_argument("--repair", action="store_true", help="send low-confidence cards to Gemini")
-    ap.add_argument("--model", default="gemini-2.5-flash", help="Gemini model for --repair")
+    ap.add_argument("--repair", action="store_true", help="send low-confidence cards to an LLM")
+    ap.add_argument("--model", default=None,
+                    help="OpenRouter model id for --repair (default: $OPENROUTER_MODEL_SMART)")
     ap.add_argument("--limit", type=int, default=0, help="max cards to repair")
     args = ap.parse_args()
 

@@ -60,7 +60,12 @@ function buildInitialState(): AppState {
     deckSize: 0,
     drillLogs: [],
     insights: [],
-    seedVersion: 2,
+    seedVersion: 3,
+    // --- v3 ---
+    trackProgress: {},
+    bookProgress: {},
+    quizResults: [],
+    predictions: [],
   };
 }
 
@@ -116,6 +121,11 @@ function hydrate(parsed: Partial<AppState>): AppState {
     deckSize: parsed.deckSize ?? base.deckSize,
     drillLogs: parsed.drillLogs ?? base.drillLogs,
     insights: parsed.insights ?? base.insights,
+    // v3 fields tolerate older payloads the same way.
+    trackProgress: parsed.trackProgress ?? base.trackProgress,
+    bookProgress: parsed.bookProgress ?? base.bookProgress,
+    quizResults: parsed.quizResults ?? base.quizResults,
+    predictions: parsed.predictions ?? base.predictions,
     seedVersion: base.seedVersion,
   } as AppState;
 }

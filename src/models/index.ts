@@ -44,6 +44,17 @@ export interface Task {
   location?: TaskLocation; // campus-only tasks only land on days you're on campus
   /** Part of day this task suits best (markets read = morning, deep work = evening…). */
   prefer?: 'morning' | 'midday' | 'evening';
+  /**
+   * The catalogue item this task is asking for. Completing the task advances
+   * that track's cursor, which is what makes tomorrow's task the *next* item
+   * rather than the same generic prompt again.
+   */
+  trackId?: TrackId;
+  trackItemId?: string;
+  /** Concrete sub-steps shown inline (a Bloomberg function's "try this"). */
+  steps?: string[];
+  /** Extra links for the task — the specific problems, not a homepage. */
+  links?: { label: string; url: string }[];
 }
 
 /** Where the task can physically be done. */
@@ -318,6 +329,99 @@ export interface CurriculumWeek {
   primaryPillar: PillarId;
 }
 
+// ---------------------------------------------------------------------------
+// Learning tracks: ordered catalogues of concrete items (a LeetCode problem, a
+// Bloomberg function, a book chapter) with a per-track cursor.
+//
+// Catalogue text lives in bundled modules under data/tracks; only the ids the
+// user has finished are persisted, following the same split as the flashcard
+// deck so the synced state stays small.
+// ---------------------------------------------------------------------------
+
+export type TrackId = 'leetcode' | 'bloomberg' | 'reading';
+
+/** Everything a track catalogue item must have for the planner to schedule it. */
+export interface TrackItem {
+  id: string;
+  title: string;
+  estMinutes?: number;
+  /** Ids that should be done first — the planner will not skip ahead past these. */
+  buildsOn?: string[];
+}
+
+export interface TrackCursor {
+  completedIds: string[];
+  /** Explicitly passed over — never offered again, but not counted as done. */
+  skippedIds: string[];
+  lastDoneDate?: string;
+}
+
+export const EMPTY_CURSOR: TrackCursor = { completedIds: [], skippedIds: [] };
+
+// ---------------------------------------------------------------------------
+// Books: the reading shelf, with per-chapter progress
+// ---------------------------------------------------------------------------
+
+export type BookStatus = 'unread' | 'reading' | 'finished' | 'abandoned';
+
+export interface BookProgress {
+  status: BookStatus;
+  /** Chapter numbers ticked off. */
+  chaptersDone: number[];
+  currentPage?: number;
+  startedAt?: string;
+  finishedAt?: string;
+  rating?: number; // 1-5, set on finish
+  /** The user's own copy — a Drive/library link they paste in. */
+  myLink?: string;
+  /** Google Play Books volume id, for the "Open in Play Books" deep link. */
+  playBooksVolumeId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Learn: quiz attempts
+// ---------------------------------------------------------------------------
+
+export interface QuizResult {
+  id: string;
+  moduleId: string;
+  date: string;
+  correct: number;
+  total: number;
+  ms: number;
+  /** Question ids answered wrongly, so their glossary cards can be re-queued. */
+  missedIds: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Markets: scored predictions
+//
+// The journal already asks for a prediction; nothing ever checked it. A
+// prediction carries a direction and a horizon so it can be resolved against
+// real prices and scored for calibration.
+// ---------------------------------------------------------------------------
+
+export type PredictionDirection = 'up' | 'down' | 'flat';
+
+export interface Prediction {
+  id: string;
+  date: string;
+  symbol: string;
+  direction: PredictionDirection;
+  horizonDays: number;
+  /** Resolve on this date using the close. */
+  resolveDate: string;
+  /** 0.5-1.0 — how sure, for the Brier score. */
+  confidence: number;
+  rationale: string;
+  /** Set once resolved. */
+  resolvedAt?: string;
+  actualChangePct?: number;
+  correct?: boolean;
+  /** Links back to the journal entry this came from. */
+  journalEntryId?: string;
+}
+
 export interface AppState {
   profileName: string;
   startDate: string; // when the program started (drives week/month position)
@@ -352,6 +456,13 @@ export interface AppState {
   insights: Insight[];
   /** Bumped when seed data changes so new decks/links appear on upgrade. */
   seedVersion?: number;
+  // --- v3: concrete learning tracks, books, quizzes, scored predictions ---
+  /** Per-track cursor — which catalogue items are done. */
+  trackProgress: Record<string, TrackCursor>;
+  /** Per-book reading progress, keyed by book id. */
+  bookProgress: Record<string, BookProgress>;
+  quizResults: QuizResult[];
+  predictions: Prediction[];
 }
 
 export interface Deadline {
