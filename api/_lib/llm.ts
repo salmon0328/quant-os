@@ -65,11 +65,27 @@ function endpoint(): string {
   return `${base}/chat/completions`;
 }
 
-function modelFor(opts: ChatOptions): string {
-  if (opts.model) return opts.model;
-  return opts.tier === 'smart'
+/**
+ * Model candidates for a tier, in order of preference.
+ *
+ * LLM_MODEL_FAST / LLM_MODEL_SMART accept a comma-separated list. Free tiers
+ * rate-limit aggressively and retire models without notice, so a single model
+ * id is a single point of failure — listing several lets a request fall through
+ * to the next one instead of failing.
+ */
+function modelsFor(opts: ChatOptions): string[] {
+  if (opts.model) return [opts.model];
+  const raw = opts.tier === 'smart'
     ? process.env.LLM_MODEL_SMART || 'ag/gemini-3.1-pro-low'
     : process.env.LLM_MODEL_FAST || 'ag/gemini-3.8-flash';
+  const models = raw.split(',').map((m) => m.trim()).filter(Boolean);
+  return models.length ? models : ['ag/gemini-3.8-flash'];
+}
+
+/** True for failures another model might not have — quota, capacity, retirement. */
+function worthFallingBack(error: string): boolean {
+  return /quota|429|rate.?limit|unavailable|retired|not found|404|410|no access|capacity|overload/i
+    .test(error);
 }
 
 /**
@@ -190,10 +206,26 @@ export function readCompletion(raw: string): Completion | { error: string } {
 }
 
 export async function chat(opts: ChatOptions): Promise<ChatResult> {
-  const key = process.env.LLM_API_KEY;
-  if (!key) return { ok: false, error: 'AI is not configured (LLM_API_KEY is unset).' };
+  if (!process.env.LLM_API_KEY) {
+    return { ok: false, error: 'AI is not configured (LLM_API_KEY is unset).' };
+  }
 
-  const model = modelFor(opts);
+  const models = modelsFor(opts);
+  let last: ChatResult = { ok: false, error: 'No models configured.' };
+
+  for (const model of models) {
+    const result = await callModel(opts, model);
+    if (result.ok) return result;
+    last = result;
+    // A bad prompt fails the same way on every model; only fall through when
+    // the failure is about this model's availability.
+    if (!worthFallingBack(result.error ?? '')) break;
+  }
+  return last;
+}
+
+async function callModel(opts: ChatOptions, model: string): Promise<ChatResult> {
+  const key = process.env.LLM_API_KEY as string;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 

@@ -80,10 +80,32 @@ def endpoint() -> str:
     return f"{base}/chat/completions"
 
 
+def models_for(tier: str) -> list[str]:
+    """Candidate models for a tier, in preference order.
+
+    The env vars accept a comma-separated list. Free tiers rate-limit hard and
+    retire models without notice, so a single id is a single point of failure.
+    """
+    raw = (os.environ.get("LLM_MODEL_SMART", "ag/gemini-3.1-pro-low") if tier == "smart"
+           else os.environ.get("LLM_MODEL_FAST", "ag/gemini-3.8-flash"))
+    models = [m.strip() for m in raw.split(",") if m.strip()]
+    return models or ["ag/gemini-3.8-flash"]
+
+
 def model_for(tier: str) -> str:
-    if tier == "smart":
-        return os.environ.get("LLM_MODEL_SMART", "ag/gemini-3.1-pro-low")
-    return os.environ.get("LLM_MODEL_FAST", "ag/gemini-3.8-flash")
+    """First-choice model for a tier — kept for callers that just want a name."""
+    return models_for(tier)[0]
+
+
+_FALLBACK_PATTERN = re.compile(
+    r"quota|429|rate.?limit|unavailable|retired|not found|404|410|no access|capacity|overload",
+    re.IGNORECASE,
+)
+
+
+def _worth_falling_back(message: str) -> bool:
+    """True for failures another model might not have."""
+    return bool(_FALLBACK_PATTERN.search(message))
 
 
 # JSON permits "\\/bfnrtu after a backslash. Models writing formulas emit things
@@ -250,6 +272,37 @@ def chat(
     key = os.environ.get("LLM_API_KEY")
     if not key:
         raise LlmError("LLM_API_KEY is not set (see .env.example)")
+
+    candidates = [model] if model else models_for(tier)
+    last_failure = ""
+    for candidate in candidates:
+        try:
+            return _chat_once(
+                system=system, user=user, model=candidate, max_tokens=max_tokens,
+                temperature=temperature, want_json=want_json, usage=usage, key=key,
+            )
+        except LlmError as exc:
+            last_failure = str(exc)
+            # A malformed prompt fails identically everywhere; only fall through
+            # when the failure is about this model's availability.
+            if not _worth_falling_back(last_failure):
+                raise
+            if candidate != candidates[-1]:
+                print(f"    ! {candidate} unavailable, trying next: {last_failure[:90]}")
+    raise LlmError(last_failure or "no models configured")
+
+
+def _chat_once(
+    *,
+    system: str,
+    user: str,
+    model: str,
+    max_tokens: int,
+    temperature: float | None,
+    want_json: bool,
+    usage: Usage | None,
+    key: str,
+) -> Any:
 
     payload: dict[str, Any] = {
         "model": model or model_for(tier),
