@@ -18,7 +18,14 @@ const DEFAULT_BASE_URL = 'http://localhost:20128/v1';
 const FETCH_TIMEOUT_MS = 45_000;
 
 /** Hard ceiling regardless of what a caller asks for — a runaway loop is expensive. */
-const MAX_OUTPUT_TOKENS = 2_000;
+const MAX_OUTPUT_TOKENS = 4_000;
+
+/**
+ * Thinking models spend part of the budget on reasoning tokens before emitting
+ * any content, so a tight max_tokens yields an empty completion. Every request
+ * gets this much headroom on top of what the caller asked for.
+ */
+const REASONING_HEADROOM = 600;
 
 export type Role = 'system' | 'user' | 'assistant';
 export interface Message {
@@ -61,7 +68,7 @@ function endpoint(): string {
 function modelFor(opts: ChatOptions): string {
   if (opts.model) return opts.model;
   return opts.tier === 'smart'
-    ? process.env.LLM_MODEL_SMART || 'ag/claude-sonnet-4-6'
+    ? process.env.LLM_MODEL_SMART || 'ag/gemini-3.1-pro-low'
     : process.env.LLM_MODEL_FAST || 'ag/gemini-3.8-flash';
 }
 
@@ -101,6 +108,87 @@ export function parseJsonLoose(raw: string): unknown | undefined {
   return undefined;
 }
 
+interface Completion {
+  text: string;
+  usage: { prompt: number; completion: number };
+}
+
+/**
+ * Normalises a completion response into text plus usage.
+ *
+ * 9Router answers with text/event-stream even when streaming was not
+ * requested, so a plain JSON.parse fails on every call. Reassemble the deltas
+ * when the body is SSE, and report an error chunk rather than an empty string.
+ */
+export function readCompletion(raw: string): Completion | { error: string } {
+  const body = raw.trim();
+  if (!body) return { error: 'The gateway returned an empty response.' };
+
+  const usage = { prompt: 0, completion: 0 };
+
+  if (!body.startsWith('data:')) {
+    try {
+      const json = JSON.parse(body) as {
+        choices?: { message?: { content?: string } }[];
+        usage?: { prompt_tokens?: number; completion_tokens?: number };
+        error?: { message?: string };
+      };
+      if (json.error) return { error: json.error.message ?? 'Unknown gateway error.' };
+      const text = json.choices?.[0]?.message?.content;
+      if (!text) return { error: 'The model returned an empty response.' };
+      return {
+        text,
+        usage: { prompt: json.usage?.prompt_tokens ?? 0, completion: json.usage?.completion_tokens ?? 0 },
+      };
+    } catch {
+      return { error: `The gateway returned non-JSON: ${body.slice(0, 200)}` };
+    }
+  }
+
+  let text = '';
+  let finish: string | undefined;
+  let reasoning = 0;
+  for (const line of body.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('data:')) continue;
+    const payload = trimmed.slice(5).trim();
+    if (!payload || payload === '[DONE]') continue;
+    let chunk: {
+      choices?: { delta?: { content?: string }; finish_reason?: string }[];
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        completion_tokens_details?: { reasoning_tokens?: number };
+      };
+      error?: { message?: string } | string;
+    };
+    try {
+      chunk = JSON.parse(payload);
+    } catch {
+      continue;
+    }
+    if (chunk.error) {
+      const message = typeof chunk.error === 'string' ? chunk.error : chunk.error.message;
+      return { error: message ?? 'Unknown gateway error.' };
+    }
+    if (chunk.usage) {
+      usage.prompt = chunk.usage.prompt_tokens ?? usage.prompt;
+      usage.completion = chunk.usage.completion_tokens ?? usage.completion;
+      reasoning = chunk.usage.completion_tokens_details?.reasoning_tokens ?? reasoning;
+    }
+    for (const choice of chunk.choices ?? []) {
+      text += choice.delta?.content ?? '';
+      finish = choice.finish_reason ?? finish;
+    }
+  }
+
+  if (!text) {
+    const hint = reasoning ? ` It spent ${reasoning} tokens reasoning — max_tokens is too low.` : '';
+    return { error: `The model produced no content (finish_reason: ${finish ?? 'unknown'}).${hint}` };
+  }
+  return { text, usage };
+}
+
 export async function chat(opts: ChatOptions): Promise<ChatResult> {
   const key = process.env.LLM_API_KEY;
   if (!key) return { ok: false, error: 'AI is not configured (LLM_API_KEY is unset).' };
@@ -123,7 +211,7 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
       body: JSON.stringify({
         model,
         messages: opts.messages,
-        max_tokens: Math.min(opts.maxTokens ?? 1_000, MAX_OUTPUT_TOKENS),
+        max_tokens: Math.min((opts.maxTokens ?? 1_000) + REASONING_HEADROOM, MAX_OUTPUT_TOKENS),
         temperature: opts.temperature ?? (opts.json ? 0.2 : 0.6),
         ...(opts.json ? { response_format: { type: 'json_object' } } : {}),
       }),
@@ -134,21 +222,9 @@ export async function chat(opts: ChatOptions): Promise<ChatResult> {
       return { ok: false, error: `The model gateway returned ${res.status}. ${detail}`.trim(), model };
     }
 
-    const body = (await res.json()) as {
-      choices?: { message?: { content?: string } }[];
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
-      error?: { message?: string };
-    };
-
-    if (body.error) return { ok: false, error: body.error.message ?? 'Unknown gateway error.', model };
-
-    const text = body.choices?.[0]?.message?.content;
-    if (!text) return { ok: false, error: 'The model returned an empty response.', model };
-
-    const usage = {
-      prompt: body.usage?.prompt_tokens ?? 0,
-      completion: body.usage?.completion_tokens ?? 0,
-    };
+    const parsed = readCompletion(await res.text());
+    if ('error' in parsed) return { ok: false, error: parsed.error, model };
+    const { text, usage } = parsed;
 
     if (!opts.json) return { ok: true, text, model, usage };
 

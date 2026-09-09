@@ -10,7 +10,7 @@ Environment:
     LLM_API_KEY      required
     LLM_BASE_URL     default http://localhost:20128/v1  (9Router)
     LLM_MODEL_FAST   default ag/gemini-3.8-flash
-    LLM_MODEL_SMART  default ag/claude-sonnet-4-6
+    LLM_MODEL_SMART  default ag/gemini-3.1-pro-low
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def endpoint() -> str:
 
 def model_for(tier: str) -> str:
     if tier == "smart":
-        return os.environ.get("LLM_MODEL_SMART", "ag/claude-sonnet-4-6")
+        return os.environ.get("LLM_MODEL_SMART", "ag/gemini-3.1-pro-low")
     return os.environ.get("LLM_MODEL_FAST", "ag/gemini-3.8-flash")
 
 
@@ -102,6 +102,56 @@ def parse_json_loose(raw: str) -> Any:
             if depth == 0:
                 return json.loads(text[start : i + 1])
     raise LlmError("model returned unbalanced JSON")
+
+
+def _read_completion(raw: bytes) -> dict:
+    """Normalises a completion response into the plain OpenAI JSON shape.
+
+    9Router replies with text/event-stream even when streaming was not
+    requested, so a bare json.loads fails on every call. Reassemble the deltas
+    when that happens, and surface an error chunk rather than returning empty.
+    """
+    text = raw.decode("utf-8", "replace").strip()
+    if not text:
+        raise LlmError("gateway returned an empty response")
+
+    if not text.startswith("data:"):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise LlmError(f"gateway returned non-JSON: {text[:200]}") from exc
+
+    content: list[str] = []
+    usage: dict = {}
+    finish = None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line[5:].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            chunk = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        if chunk.get("error"):
+            raise LlmError(str(chunk["error"])[:300])
+        if chunk.get("usage"):
+            usage = chunk["usage"]
+        for choice in chunk.get("choices") or []:
+            content.append((choice.get("delta") or {}).get("content") or "")
+            finish = choice.get("finish_reason") or finish
+
+    joined = "".join(content)
+    if not joined:
+        # Thinking models spend the budget on reasoning tokens first; an empty
+        # body with a length stop is almost always max_tokens set too low.
+        reasoning = (usage.get("completion_tokens_details") or {}).get("reasoning_tokens", 0)
+        hint = f" (spent {reasoning} reasoning tokens -- raise max_tokens)" if reasoning else ""
+        raise LlmError(f"model produced no content, finish_reason={finish}{hint}")
+
+    return {"choices": [{"message": {"content": joined}}], "usage": usage}
 
 
 def chat(
@@ -152,14 +202,20 @@ def chat(
         )
         try:
             with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
-                data = json.loads(response.read().decode("utf-8"))
+                data = _read_completion(response.read())
             break
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:300]
             last_error = f"HTTP {exc.code}: {detail}"
+            # A model whose quota is exhausted for days will not recover during
+            # a backoff loop -- fail fast so the operator can switch models.
+            if "quota" in detail.lower() or "RESOURCE_EXHAUSTED" in detail:
+                raise LlmError(f"model quota exhausted: {detail[:200]}") from exc
             # 4xx other than rate limiting will not succeed on a retry.
             if exc.code != 429 and exc.code < 500:
                 raise LlmError(last_error) from exc
+        except LlmError:
+            raise
         except (urllib.error.URLError, TimeoutError) as exc:
             last_error = str(exc)
         if attempt == MAX_ATTEMPTS - 1:
