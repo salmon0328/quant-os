@@ -558,7 +558,6 @@ export interface AppState {
   // --- v2: rhythm, inputs, drill, insights ---
   schedule: ScheduleSettings;
   fixedBlocks: FixedBlock[];
-  feed: FeedItem[];
   /** cardId -> progress. Card text comes from the bundled deck. */
   cardProgress: Record<string, CardProgress>;
   /** Cards loaded from the bundled deck (0 until the deck is opened once). */
@@ -681,20 +680,6 @@ export interface FeedSource {
   pillar: PillarId;
   needsCampus?: boolean;
   note?: string;
-}
-
-export interface FeedItem {
-  id: string;
-  title: string;
-  type: FeedType;
-  url?: string;
-  source: string; // "Thoughts on the Market", "Quartr", "Doomberg"…
-  estMinutes: number;
-  pillar: PillarId;
-  status: 'inbox' | 'done' | 'archived';
-  addedAt: string;
-  notes?: string;
-  needsCampus?: boolean;
 }
 
 // ---------------------------------------------------------------------------

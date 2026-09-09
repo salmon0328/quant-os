@@ -10,7 +10,6 @@ import Markets from './pages/Markets';
 import Projects from './pages/Projects';
 import Research from './pages/Research';
 import Insights from './pages/Insights';
-import Inbox from './pages/Inbox';
 import Settings from './pages/Settings';
 import Career from './pages/Career';
 import Drill from './pages/Drill';
@@ -57,7 +56,8 @@ function Gate() {
             <Route path="/projects" element={<Projects />} />
             <Route path="/insights" element={<Insights />} />
             <Route path="/research" element={<Research />} />
-            <Route path="/inbox" element={<Inbox />} />
+            {/* Inbox removed in v3 — deep input now rotates a curated source list. */}
+            <Route path="/inbox" element={<Navigate to="/markets" replace />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/career" element={<Career />} />
             <Route path="/drill" element={<Drill />} />

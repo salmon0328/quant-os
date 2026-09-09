@@ -1,4 +1,4 @@
-import type { AppState, EnergyMode, FeedItem, Task, TaskCategory, PillarId, TrackId } from '../models';
+import type { AppState, EnergyMode, FeedSource, Task, TaskCategory, PillarId, TrackId } from '../models';
 import { DEFAULT_SCHEDULE } from '../models';
 import { weekForIndex } from '../data/curriculum';
 import { weekIndexFrom, dayOfWeek, daysBetween } from '../lib/date';
@@ -10,6 +10,7 @@ import { cursorFor, nextItem, nextItems } from './tracks';
 import { LEETCODE, leetcodeUrl, neetcodeUrl } from '../data/tracks/leetcode';
 import { TERMINAL } from '../data/tracks/bloomberg';
 import { READING } from '../data/tracks/reading';
+import { FEED_SOURCES } from '../data/feedSources';
 
 export const ENERGY_BUDGET: Record<EnergyMode, number> = {
   low: 45, // minimum viable day
@@ -57,24 +58,16 @@ interface Spec {
 
 // -------------------------------------------------------------------- inputs
 
-function labelForType(t: FeedItem['type']): string {
+function labelForType(t: FeedSource['type']): string {
   switch (t) {
     case 'podcast': return 'Podcast';
     case 'substack': return 'Read';
-    case 'earnings': return 'Quartr';
+    case 'earnings': return 'Earnings call';
     case 'paper': return 'Paper';
     case 'video': return 'Video';
     case 'terminal': return 'Terminal';
     default: return 'News';
   }
-}
-
-/** The oldest queued item wins, so the queue drains in the order it filled. */
-function nextQueued(feed: FeedItem[], onCampus: boolean): FeedItem | undefined {
-  return feed
-    .filter((f) => f.status === 'inbox' && (!f.needsCampus || onCampus))
-    .slice()
-    .sort((a, b) => a.addedAt.localeCompare(b.addedAt))[0];
 }
 
 // ------------------------------------------------------------------- builders
@@ -216,36 +209,47 @@ function theorySpec(state: AppState, minutes: number): Spec {
 }
 
 /** Deep input prefers a real queued item; otherwise it names a rotation. */
-function deepInputSpec(feed: FeedItem[], onCampus: boolean, minutes: number): Spec {
-  const queued = nextQueued(feed, onCampus);
-  if (queued) {
+/**
+ * One named source per session, rotated deterministically.
+ *
+ * This used to drain a queue the user filled by hand, which is why it was
+ * usually empty. Rotating the curated source list means the task always names
+ * something specific with a real link, and no data entry is required.
+ */
+function deepInputSpec(dateISO: string, weekIdx: number, onCampus: boolean, minutes: number): Spec {
+  const pool = FEED_SOURCES.filter((f) => !f.needsCampus || onCampus);
+  const rank = TASK_KIND_BY_ID.get('deepInput')!.rank;
+
+  // Index on the day-of-year plus the week, so the same source does not recur
+  // on the same weekday every week.
+  const seed = Number(dateISO.slice(8, 10)) + weekIdx * 3;
+  const source = pool[seed % Math.max(1, pool.length)];
+
+  if (!source) {
     return {
-      kind: 'deepInput',
-      pillar: queued.pillar,
-      category: 'markets',
-      title: `${labelForType(queued.type)} — ${queued.title}`,
-      why: 'You saved this for a reason. Clearing one item a day keeps the inbox honest.',
-      minutes: Math.max(minutes, queued.estMinutes),
-      url: queued.url,
-      output: 'Write 2-3 lines: what was the claim, what was the evidence, what do you disagree with?',
-      priority: 'optional',
-      location: queued.needsCampus ? 'campus' : 'anywhere',
-      prefer: queued.type === 'podcast' ? 'midday' : 'morning',
-      rank: TASK_KIND_BY_ID.get('deepInput')!.rank,
+      kind: 'deepInput', pillar: 'finance', category: 'markets',
+      title: 'Deep input — pick a long-form read',
+      why: 'One substantial input a session, rather than a stream of headlines.',
+      minutes,
+      output: 'Two or three lines: the claim, the evidence, and what you disagree with.',
+      priority: 'optional', prefer: 'midday', rank,
     };
   }
+
   return {
     kind: 'deepInput',
-    pillar: 'finance',
+    pillar: source.pillar,
     category: 'markets',
-    title: 'Quartr — earnings call deep dive',
-    why: 'Primary-source company research. Earnings language is what interviewers expect.',
-    minutes,
-    resourceId: 'quartr',
-    output: 'One company: guidance vs results, what management avoided, one follow-up question.',
+    title: `${labelForType(source.type)} — ${source.name}`,
+    why: source.note ?? 'A substantial input beats another scroll through headlines.',
+    minutes: Math.max(minutes, Math.min(source.defaultMinutes, 60)),
+    url: source.url,
+    output: 'Two or three lines: the claim, the evidence, and what you disagree with. File it in Insights.',
     priority: 'optional',
-    prefer: 'morning',
-    rank: TASK_KIND_BY_ID.get('deepInput')!.rank,
+    location: source.needsCampus ? 'campus' : 'anywhere',
+    prefer: source.type === 'podcast' ? 'midday' : 'morning',
+    rank,
+    links: [{ label: source.name, url: source.url }],
   };
 }
 
@@ -386,7 +390,6 @@ export function generateTasks(
   const dow = dayOfWeek(dateISO);
   const onCampus = isCampusDay(settings, dateISO);
   const cw = weekForIndex(weekIdx);
-  const feed = state.feed ?? [];
 
   const caps = ENERGY_CAPS[energy] ?? ENERGY_CAPS.normal;
   const defaultCore = settings.maxCoreTasks || caps.core;
@@ -440,42 +443,13 @@ export function generateTasks(
   if (onDay(theory)) candidates.push(theorySpec(state, mins(theory)));
 
   const deepInput = TASK_KIND_BY_ID.get('deepInput')!;
-  if (onDay(deepInput)) candidates.push(deepInputSpec(feed, onCampus, mins(deepInput)));
+  if (onDay(deepInput)) candidates.push(deepInputSpec(dateISO, weekIdx, onCampus, mins(deepInput)));
 
   const drill = TASK_KIND_BY_ID.get('drill')!;
   if (onDay(drill)) candidates.push(drillSpec(state, dateISO, mins(drill)));
 
   const terminal = TASK_KIND_BY_ID.get('terminal')!;
   if (onDay(terminal) && onCampus) candidates.push(terminalSpec(state, mins(terminal)));
-
-  // ----------------------------------------------- fill an empty core slot
-  // Weekdays with no rotation task would otherwise be nearly empty. Rather than
-  // inventing random work, drain the inbox the user already filled.
-  const coreCount = candidates.filter((c) => c.priority === 'core').length;
-  if (coreCount < maxCore && dow !== 0 && upcoming.length === 0) {
-    const queued = nextQueued(feed, onCampus);
-    // Guard on url only when there is one: comparing undefined === undefined
-    // would treat an un-linked item as already scheduled and skip it.
-    const alreadyQueued = queued?.url
-      ? candidates.some((c) => c.url === queued.url)
-      : false;
-    if (queued && !alreadyQueued) {
-      candidates.push({
-        kind: 'deepInput',
-        pillar: queued.pillar,
-        category: 'markets',
-        title: `Clear inbox — ${queued.title}`,
-        why: 'Your queue drains in the order you filled it, on days the rhythm leaves room.',
-        minutes: Math.min(queued.estMinutes, 45),
-        url: queued.url,
-        output: 'Two lines: what it argued, and whether you buy it.',
-        priority: 'core',
-        location: queued.needsCampus ? 'campus' : 'anywhere',
-        prefer: 'midday',
-        rank: deepInput.rank,
-      });
-    }
-  }
 
   // ------------------------------------------------------------- weakest pillar
   const weakest = [...state.pillars].sort((a, b) => a.score - b.score)[0];

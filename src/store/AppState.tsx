@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type {
-  AppState, CardProgress, EnergyMode, FeedItem, FixedBlock, Insight,
+  AppState, CardProgress, EnergyMode, FixedBlock, Insight,
   ScheduleSettings, Task, TaskStatus, TrackId, KnowledgeEntry, DayLog, Lesson, RecallGrade,
   FlashcardSeed, BookProgress, BookStatus, QuizResult, Prediction,
 } from '../models';
@@ -60,7 +60,6 @@ function buildInitialState(): AppState {
     // --- v2 ---
     schedule: { ...DEFAULT_SCHEDULE },
     fixedBlocks: [],
-    feed: [],
     cardProgress: {},
     deckSize: 0,
     drillLogs: [],
@@ -122,7 +121,6 @@ function hydrate(parsed: Partial<AppState>): AppState {
     // v2 fields tolerate older payloads.
     schedule: migrateSchedule({ ...base.schedule, ...(parsed.schedule ?? {}) }),
     fixedBlocks: parsed.fixedBlocks ?? base.fixedBlocks,
-    feed: parsed.feed ?? base.feed,
     cardProgress: parsed.cardProgress ?? base.cardProgress,
     deckSize: parsed.deckSize ?? base.deckSize,
     drillLogs: parsed.drillLogs ?? base.drillLogs,
@@ -248,10 +246,6 @@ interface Ctx {
   addFixedBlock: (b: FixedBlock) => void;
   updateFixedBlock: (b: FixedBlock) => void;
   removeFixedBlock: (id: string) => void;
-  // v2: inbox
-  addFeedItem: (f: FeedItem) => void;
-  setFeedStatus: (id: string, status: FeedItem['status']) => void;
-  removeFeedItem: (id: string) => void;
   // v2: drill
   setDeckSize: (n: number) => void;
   addPrediction: (p: Prediction) => void;
@@ -598,13 +592,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     patch({ fixedBlocks: blocks, tasks: rescheduleAll({ ...state, fixedBlocks: blocks }) });
   };
 
-  // ------------------------------------------------------------------ inbox
-
-  const addFeedItem = (f: FeedItem) => patch({ feed: [f, ...(state.feed ?? [])] });
-  const setFeedStatus = (id: string, status: FeedItem['status']) =>
-    patch({ feed: (state.feed ?? []).map((f) => (f.id === id ? { ...f, status } : f)) });
-  const removeFeedItem = (id: string) => patch({ feed: (state.feed ?? []).filter((f) => f.id !== id) });
-
   // ------------------------------------------------------------------ drill
 
   const setDeckSize = (n: number) => {
@@ -779,7 +766,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       energyFor, setEnergy, ensureTasksForDate, regenerateTasks, rescheduleDay,
       toggleTask, skipTrackItems, addTask, updateTask, deleteTask, rescheduleMissed, reviewKnowledge,
       updateSchedule, setCadence, syncCalendar, addFixedBlock, updateFixedBlock, removeFixedBlock,
-      addFeedItem, setFeedStatus, removeFeedItem,
       setDeckSize, addPrediction, resolvePredictions, setWatchlist, recordQuiz, setBookProgress, tickChapter, adoptDeck, reviewCard, logDrill,
       addInsight, updateInsight, removeInsight,
       addLesson, updateLesson, removeLesson,
