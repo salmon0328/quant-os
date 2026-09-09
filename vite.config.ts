@@ -2,6 +2,7 @@ import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { fetchCalendars, requestFromQuery } from './api/_lib/icsProxy';
 import { aiStatus, handleAi } from './api/_lib/aiHandler';
+import { handleMarket, requestFromQuery as marketQuery } from './api/_lib/marketProviders';
 
 interface DevResponse {
   statusCode: number;
@@ -62,6 +63,10 @@ function apiPlugin(): Plugin {
   const routes: Record<string, DevHandler> = {
     '/api/calendar': async (req, res) => {
       const result = await fetchCalendars(requestFromQuery(queryOf(req.url ?? '')));
+      send(res, result.ok ? 200 : 400, result);
+    },
+    '/api/market': async (req, res) => {
+      const result = await handleMarket(marketQuery(queryOf(req.url ?? '')));
       send(res, result.ok ? 200 : 400, result);
     },
     '/api/ai': async (req, res) => {

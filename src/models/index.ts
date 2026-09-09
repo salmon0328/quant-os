@@ -496,13 +496,22 @@ export interface Prediction {
   symbol: string;
   direction: PredictionDirection;
   horizonDays: number;
-  /** Resolve on this date using the close. */
+  /** Resolve on this date using the prevailing price. */
   resolveDate: string;
   /** 0.5-1.0 — how sure, for the Brier score. */
   confidence: number;
   rationale: string;
+  /**
+   * Price when the call was made. Captured up front because the free data tier
+   * has no historical price endpoint — without this a prediction could never
+   * be scored after the fact.
+   */
+  startPrice: number;
+  /** Move below this counts as 'flat', in percent. */
+  flatBandPct: number;
   /** Set once resolved. */
   resolvedAt?: string;
+  endPrice?: number;
   actualChangePct?: number;
   correct?: boolean;
   /** Links back to the journal entry this came from. */
@@ -550,6 +559,8 @@ export interface AppState {
   bookProgress: Record<string, BookProgress>;
   quizResults: QuizResult[];
   predictions: Prediction[];
+  /** Tickers on the markets tape. */
+  watchlist: string[];
 }
 
 export interface Deadline {

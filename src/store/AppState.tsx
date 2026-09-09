@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useReducer, useRe
 import type {
   AppState, CardProgress, EnergyMode, FeedItem, FixedBlock, Insight,
   ScheduleSettings, Task, TaskStatus, TrackId, KnowledgeEntry, DayLog, Lesson, RecallGrade,
-  FlashcardSeed, BookProgress, BookStatus, QuizResult,
+  FlashcardSeed, BookProgress, BookStatus, QuizResult, Prediction,
 } from '../models';
 import { DEFAULT_SCHEDULE } from '../models';
 import { PILLARS } from '../data/pillars';
@@ -12,6 +12,7 @@ import { KNOWLEDGE } from '../data/knowledge';
 import { LESSONS } from '../data/lessons';
 import { today, mondayOf, addDays } from '../lib/date';
 import { uid } from '../lib/id';
+import { DEFAULT_WATCHLIST } from '../data/watchlist';
 import { generateTasks, scheduleExisting } from '../engine/taskGenerator';
 import { completeItems, skipItems, uncompleteItems } from '../engine/tracks';
 import { chaptersOf, EMPTY_BOOK_PROGRESS } from '../data/books';
@@ -70,6 +71,7 @@ function buildInitialState(): AppState {
     bookProgress: {},
     quizResults: [],
     predictions: [],
+    watchlist: DEFAULT_WATCHLIST,
   };
 }
 
@@ -130,6 +132,7 @@ function hydrate(parsed: Partial<AppState>): AppState {
     bookProgress: migrateBookProgress(parsed),
     quizResults: parsed.quizResults ?? base.quizResults,
     predictions: parsed.predictions ?? base.predictions,
+    watchlist: parsed.watchlist?.length ? parsed.watchlist : base.watchlist,
     seedVersion: base.seedVersion,
   } as AppState;
 }
@@ -251,6 +254,9 @@ interface Ctx {
   removeFeedItem: (id: string) => void;
   // v2: drill
   setDeckSize: (n: number) => void;
+  addPrediction: (p: Prediction) => void;
+  resolvePredictions: (resolved: Prediction[]) => void;
+  setWatchlist: (symbols: string[]) => void;
   recordQuiz: (
     moduleId: string,
     result: { correct: number; total: number; ms: number; missedIds: string[]; concepts: string[] }
@@ -638,6 +644,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     patch({ deckSize: seeds.length, cardProgress: migrated });
   };
 
+  // ----------------------------------------------------------------- markets
+
+  const addPrediction = (p: Prediction) =>
+    patch({ predictions: [p, ...(state.predictions ?? [])] });
+
+  /** Writes back a batch of predictions the market page has just resolved. */
+  const resolvePredictions = (resolved: Prediction[]) => {
+    const byId = new Map(resolved.map((p) => [p.id, p]));
+    patch({ predictions: (state.predictions ?? []).map((p) => byId.get(p.id) ?? p) });
+  };
+
+  const setWatchlist = (symbols: string[]) => patch({ watchlist: symbols });
+
   // ------------------------------------------------------------------- learn
 
   /**
@@ -761,7 +780,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       toggleTask, skipTrackItems, addTask, updateTask, deleteTask, rescheduleMissed, reviewKnowledge,
       updateSchedule, setCadence, syncCalendar, addFixedBlock, updateFixedBlock, removeFixedBlock,
       addFeedItem, setFeedStatus, removeFeedItem,
-      setDeckSize, recordQuiz, setBookProgress, tickChapter, adoptDeck, reviewCard, logDrill,
+      setDeckSize, addPrediction, resolvePredictions, setWatchlist, recordQuiz, setBookProgress, tickChapter, adoptDeck, reviewCard, logDrill,
       addInsight, updateInsight, removeInsight,
       addLesson, updateLesson, removeLesson,
     }),
