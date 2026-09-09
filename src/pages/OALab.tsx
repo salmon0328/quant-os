@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useApp } from '../store/AppState';
 import { Card, SectionTitle, EmptyState } from '../components/ui';
+import { EvRound, type Breakdown } from '../components/oa/EvRound';
+import { MarketMaking } from '../components/oa/MarketMaking';
+import { Zap } from '../components/oa/Zap';
+import { FIRM_PRESETS, type FirmPreset } from '../data/firmPresets';
 import type { AptitudeKind, AptitudeScore } from '../models';
 import { uid } from '../lib/id';
 import { today } from '../lib/date';
@@ -9,9 +13,12 @@ type Tab = AptitudeKind;
 
 const TABS: { key: Tab; label: string; blurb: string }[] = [
   { key: 'blitz', label: '80 in 8', blurb: '80 arithmetic questions in 8 minutes — the Optiver-style screen.' },
+  { key: 'ev', label: 'Expected value', blurb: 'Probability and EV under a clock — the SIG and Jane Street round.' },
+  { key: 'making', label: 'Market making', blurb: 'Quote a two-sided market. You only trade when you are wrong.' },
   { key: 'patterns', label: 'Patterns', blurb: 'Number series: find the rule, type the next term.' },
+  { key: 'zap', label: 'Zap', blurb: 'Timed grid — largest, smallest, closest. Search under pressure.' },
   { key: 'reaction', label: 'Reaction', blurb: 'Click the instant the box turns green. Five trials, average ms.' },
-  { key: 'wordle', label: 'Wordle', blurb: 'Six guesses at a five-letter word. Keeps pattern reasoning sharp.' },
+  { key: 'wordle', label: 'Warm-up', blurb: 'Wordle. Not an OA format — kept as a warm-up.' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -120,16 +127,34 @@ function markGuess(guess: string, target: string): Mark[] {
 
 // ---------------------------------------------------------------------------
 
-export default function Aptitude() {
+export default function OALab() {
   const { state, patch } = useApp();
   const [tab, setTab] = useState<Tab>('blitz');
+  const [preset, setPreset] = useState<FirmPreset | null>(null);
+  const [presetDone, setPresetDone] = useState(false);
   const scores = (state.aptitudeScores ?? []) as AptitudeScore[];
 
   const record = useCallback(
-    (kind: AptitudeKind, score: number, total: number, ms: number) => {
-      patch({ aptitudeScores: [...scores, { id: uid('apt-'), kind, score, total, ms, date: today() }] });
+    (kind: AptitudeKind, score: number, total: number, ms: number, breakdown?: Breakdown) => {
+      patch({
+        aptitudeScores: [
+          ...scores,
+          {
+            id: uid('apt-'), kind, score, total, ms, date: today(),
+            ...(breakdown ? { breakdown } : {}),
+            ...(preset ? { preset: preset.id } : {}),
+          },
+        ],
+      });
+      // Inside a firm battery, finishing one stage advances to the next.
+      if (preset) {
+        const at = preset.stages.findIndex((st) => st.kind === kind);
+        if (at >= 0 && at + 1 < preset.stages.length) setTab(preset.stages[at + 1].kind);
+        else if (at === preset.stages.length - 1) setPresetDone(true);
+      }
     },
-    [patch, scores]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [patch, scores, preset]
   );
 
   const bestFor = (kind: AptitudeKind) => {
@@ -143,10 +168,11 @@ export default function Aptitude() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Aptitude Lab</h1>
+        <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">OA Lab</h1>
         <p className="mt-1 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
-          The speed-and-pattern screens that trading firms use to shortlist: arithmetic blitz, number
-          series, reaction time and wordle. Every run is logged so you can see the trend, not just today.
+          The online assessments prop firms and hedge funds actually use — arithmetic under a clock,
+          expected value, quoting a two-sided market, and timed pattern search. Every run is logged,
+          so what you see is the trend rather than one lucky day.
         </p>
       </div>
 
@@ -166,6 +192,62 @@ export default function Aptitude() {
       {tab === 'patterns' && <Patterns best={bestFor('patterns')} onDone={record} />}
       {tab === 'reaction' && <Reaction best={bestFor('reaction')} onDone={record} />}
       {tab === 'wordle' && <Wordle best={bestFor('wordle')} onDone={record} />}
+      {tab === 'ev' && (
+        <EvRound
+          best={bestFor('ev')?.score ?? null}
+          onDone={(c, t, ms, bd) => record('ev', c, t, ms, bd)}
+        />
+      )}
+      {tab === 'making' && (
+        <MarketMaking
+          best={bestFor('making')?.score ?? null}
+          onDone={(pnl, rounds, ms) => record('making', pnl, rounds, ms)}
+        />
+      )}
+      {tab === 'zap' && (
+        <Zap best={bestFor('zap')?.score ?? null} onDone={(c, t, ms) => record('zap', c, t, ms)} />
+      )}
+
+      <Weakness scores={scores} />
+
+      <Card>
+        <SectionTitle>Firm presets</SectionTitle>
+        <p className="mb-3 text-xs text-slate-500">
+          Runs that firm's batteries back to back. Targets are indicative — what candidates commonly
+          report, not published pass marks.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {FIRM_PRESETS.map((f) => (
+            <div key={f.id} className={`rounded-xl border p-3 ${preset?.id === f.id ? 'border-indigo-400 bg-indigo-50/50 dark:bg-indigo-500/10' : 'border-slate-200 dark:border-slate-800'}`}>
+              <div className="flex items-center justify-between">
+                <span className="font-medium text-slate-800 dark:text-slate-100">{f.firm}</span>
+                <button
+                  className="btn-ghost text-xs"
+                  onClick={() => { setPreset(f); setPresetDone(false); setTab(f.stages[0].kind); }}
+                >
+                  Run battery
+                </button>
+              </div>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{f.blurb}</p>
+              <ul className="mt-2 space-y-0.5 text-[11px] text-slate-400">
+                {f.stages.map((st) => (
+                  <li key={st.kind}>
+                    {TABS.find((t) => t.key === st.kind)?.label ?? st.kind} — {st.target}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+        {preset && (
+          <div className="mt-3 rounded-lg bg-indigo-50 p-2 text-xs dark:bg-indigo-500/10">
+            {presetDone
+              ? <>Battery complete — <b>{preset.firm}</b>. Scroll down for the runs, and compare against the targets above.</>
+              : <>Running the <b>{preset.firm}</b> battery. Finish each stage and the next one opens automatically.</>}
+            <button className="ml-2 underline" onClick={() => { setPreset(null); setPresetDone(false); }}>Exit</button>
+          </div>
+        )}
+      </Card>
 
       <Card>
         <SectionTitle>Recent runs</SectionTitle>
@@ -181,7 +263,9 @@ export default function Aptitude() {
                     ? `${s.ms} ms avg`
                     : s.kind === 'wordle'
                       ? s.score === 1 ? `solved in ${s.total}` : `missed`
-                      : `${s.score}/${s.total} in ${(s.ms / 1000).toFixed(0)}s`}
+                      : s.kind === 'making'
+                        ? `P&L ${s.score >= 0 ? '+' : ''}${s.score.toFixed(1)} over ${s.total} rounds`
+                        : `${s.score}/${s.total} in ${(s.ms / 1000).toFixed(0)}s`}
                 </span>
               </div>
             ))}
@@ -588,6 +672,61 @@ function Wordle({ best, onDone }: { best: AptitudeScore | null; onDone: (k: Apti
           <button className="btn-primary mt-3" onClick={begin}>New word</button>
         </div>
       )}
+    </Card>
+  );
+}
+
+/**
+ * Weakness analytics.
+ *
+ * A total score tells you nothing you can act on. The EV round records which
+ * category each question came from and how long it took, so this can say which
+ * kind of question is actually costing you.
+ */
+function Weakness({ scores }: { scores: AptitudeScore[] }) {
+  const agg: Record<string, { correct: number; total: number; ms: number }> = {};
+  for (const s of scores) {
+    for (const [cat, b] of Object.entries(s.breakdown ?? {})) {
+      const a = (agg[cat] ??= { correct: 0, total: 0, ms: 0 });
+      a.correct += b.correct;
+      a.total += b.total;
+      a.ms += b.ms;
+    }
+  }
+  const rows = Object.entries(agg).filter(([, a]) => a.total >= 3);
+  if (rows.length < 2) return null;
+
+  const avgSec = (a: { ms: number; total: number }) => a.ms / a.total / 1000;
+  const overallSec = rows.reduce((x, [, a]) => x + a.ms, 0) / rows.reduce((x, [, a]) => x + a.total, 0) / 1000;
+  const worst = rows.reduce((a, b) => (a[1].correct / a[1].total <= b[1].correct / b[1].total ? a : b));
+  const slowest = rows.reduce((a, b) => (avgSec(a[1]) >= avgSec(b[1]) ? a : b));
+
+  return (
+    <Card>
+      <SectionTitle>Where you are losing points</SectionTitle>
+      <div className="space-y-1.5">
+        {rows.sort((a, b) => a[1].correct / a[1].total - b[1].correct / b[1].total).map(([cat, a]) => {
+          const acc = a.correct / a.total;
+          return (
+            <div key={cat} className="flex items-center gap-2 text-xs">
+              <span className="w-32 capitalize text-slate-500">{cat}</span>
+              <div className="h-2 flex-1 overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
+                <div className={`h-full ${acc >= 0.7 ? 'bg-emerald-500' : acc >= 0.4 ? 'bg-amber-500' : 'bg-red-500'}`}
+                     style={{ width: `${acc * 100}%` }} />
+              </div>
+              <span className="w-14 text-right text-slate-400">{Math.round(acc * 100)}%</span>
+              <span className="w-14 text-right text-slate-400">{avgSec(a).toFixed(1)}s</span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-3 text-xs text-slate-500">
+        Weakest is <b className="capitalize">{worst[0]}</b> at {Math.round((worst[1].correct / worst[1].total) * 100)}%.
+        {slowest[0] !== worst[0] && avgSec(slowest[1]) > overallSec * 1.3 && (
+          <> Slowest is <b className="capitalize">{slowest[0]}</b> at {avgSec(slowest[1]).toFixed(1)}s
+          against a {overallSec.toFixed(1)}s average — that is where the clock is going.</>
+        )}
+      </p>
     </Card>
   );
 }

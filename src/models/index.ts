@@ -282,7 +282,15 @@ export interface Module {
 // (the "80 questions in 8 minutes" style test, number series, reaction time)
 // ---------------------------------------------------------------------------
 
-export type AptitudeKind = 'blitz' | 'patterns' | 'reaction' | 'wordle';
+export type AptitudeKind =
+  | 'blitz'      // 80 arithmetic questions in 8 minutes (Optiver-style)
+  | 'patterns'   // number series
+  | 'reaction'   // reaction time
+  | 'wordle'     // kept as a warm-up; not an OA format
+  | 'ev'         // expected value / probability under time
+  | 'making'     // two-sided market making against a simulated counterparty
+  | 'zap'        // timed grid, pattern recognition under pressure
+  | 'estimation';// Fermi estimation
 
 export interface AptitudeScore {
   id: string;
@@ -294,6 +302,13 @@ export interface AptitudeScore {
   /** Elapsed ms. For reaction this is the average reaction time - lower is better. */
   ms: number;
   date: string;
+  /**
+   * Per-question-type accuracy and speed, so the lab can say "your division is
+   * 40% slower than everything else" instead of only showing a total.
+   */
+  breakdown?: Record<string, { correct: number; total: number; ms: number }>;
+  /** Set when this run was part of a firm preset battery. */
+  preset?: string;
 }
 
 export interface MarketJournalEntry {

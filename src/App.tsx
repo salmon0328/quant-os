@@ -14,7 +14,7 @@ import Inbox from './pages/Inbox';
 import Settings from './pages/Settings';
 import Career from './pages/Career';
 import Drill from './pages/Drill';
-import Aptitude from './pages/Aptitude';
+import OALab from './pages/OALab';
 import Books from './pages/Books';
 import Reviews from './pages/Reviews';
 import Roadmap from './pages/Roadmap';
@@ -63,7 +63,8 @@ function Gate() {
             <Route path="/drill" element={<Drill />} />
             {/* Renamed in v3 — keep old bookmarks working. */}
             <Route path="/knowledge" element={<Navigate to="/drill" replace />} />
-            <Route path="/aptitude" element={<Aptitude />} />
+            <Route path="/oa" element={<OALab />} />
+            <Route path="/aptitude" element={<Navigate to="/oa" replace />} />
             <Route path="/books" element={<Books />} />
             <Route path="/resources" element={<Navigate to="/books" replace />} />
             <Route path="/reviews" element={<Reviews />} />
