@@ -127,7 +127,7 @@ export default function Home() {
               <div className="mt-1 text-2xl font-bold">{inboxCount}</div>
               <div className="text-[10px] text-slate-400">queued to read</div>
             </Link>
-            <Link to="/knowledge" className="card transition-all hover:shadow-md">
+            <Link to="/drill" className="card transition-all hover:shadow-md">
               <div className="label">Drill</div>
               <div className="mt-1 text-2xl font-bold text-pink-500">{dueCards}</div>
               <div className="text-[10px] text-slate-400">cards due</div>

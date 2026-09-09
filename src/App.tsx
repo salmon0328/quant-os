@@ -1,4 +1,4 @@
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './store/AppState';
 import { AuthProvider, useAuth } from './store/AuthState';
 import { Login } from './pages/Login';
@@ -13,7 +13,7 @@ import Insights from './pages/Insights';
 import Inbox from './pages/Inbox';
 import Settings from './pages/Settings';
 import Career from './pages/Career';
-import Knowledge from './pages/Knowledge';
+import Drill from './pages/Drill';
 import Aptitude from './pages/Aptitude';
 import Resources from './pages/Resources';
 import Reviews from './pages/Reviews';
@@ -60,7 +60,9 @@ function Gate() {
             <Route path="/inbox" element={<Inbox />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/career" element={<Career />} />
-            <Route path="/knowledge" element={<Knowledge />} />
+            <Route path="/drill" element={<Drill />} />
+            {/* Renamed in v3 — keep old bookmarks working. */}
+            <Route path="/knowledge" element={<Navigate to="/drill" replace />} />
             <Route path="/aptitude" element={<Aptitude />} />
             <Route path="/resources" element={<Resources />} />
             <Route path="/reviews" element={<Reviews />} />

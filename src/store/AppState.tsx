@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type {
   AppState, CardProgress, EnergyMode, FeedItem, FixedBlock, Insight,
-  ScheduleSettings, Task, TaskStatus, TrackId, KnowledgeEntry, DayLog, Lesson,
+  ScheduleSettings, Task, TaskStatus, TrackId, KnowledgeEntry, DayLog, Lesson, RecallGrade,
+  FlashcardSeed,
 } from '../models';
 import { DEFAULT_SCHEDULE } from '../models';
 import { PILLARS } from '../data/pillars';
@@ -13,7 +14,7 @@ import { today, mondayOf, addDays } from '../lib/date';
 import { generateTasks, scheduleExisting } from '../engine/taskGenerator';
 import { completeItems, skipItems, uncompleteItems } from '../engine/tracks';
 import { scheduleNextReview, initReview } from '../engine/spacedRepetition';
-import { gradeCard } from '../data/flashcards';
+import { gradeCard, legacyIdMap } from '../data/flashcards';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import { useAuth } from './AuthState';
 // Type-only: erased at build time, so the server's fetch logic stays out of the
@@ -217,7 +218,8 @@ interface Ctx {
   removeFeedItem: (id: string) => void;
   // v2: drill
   setDeckSize: (n: number) => void;
-  reviewCard: (id: string, remembered: boolean) => void;
+  adoptDeck: (seeds: FlashcardSeed[]) => void;
+  reviewCard: (id: string, grade: RecallGrade) => void;
   logDrill: (correct: number, total: number) => void;
   // v2: insights
   addInsight: (i: Insight) => void;
@@ -563,9 +565,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const setDeckSize = (n: number) => {
     if (state.deckSize !== n) patch({ deckSize: n });
   };
-  const reviewCard = (id: string, remembered: boolean) => {
+  /**
+   * Called once when the lazily-loaded deck arrives. Records its size and
+   * carries SRS progress across any re-clean of the deck.
+   *
+   * cardId() hashes the question text, so repairing a mangled question mints a
+   * new id and the old progress entry would be orphaned — the card would look
+   * unseen and its interval would reset to day one. Each seed records the ids
+   * it previously had; this remaps progress onto the current ones.
+   *
+   * hydrate() cannot do this: the deck is ~200KB and is imported on demand, so
+   * it does not exist yet at hydrate time.
+   */
+  const adoptDeck = (seeds: FlashcardSeed[]) => {
+    const map = legacyIdMap(seeds);
+    const progress = state.cardProgress ?? {};
+    const stale = Object.keys(progress).filter((id) => map[id]);
+
+    if (stale.length === 0) {
+      if (state.deckSize !== seeds.length) patch({ deckSize: seeds.length });
+      return;
+    }
+
+    const migrated: Record<string, CardProgress> = {};
+    for (const [id, value] of Object.entries(progress)) {
+      const current = map[id] ?? id;
+      const existing = migrated[current];
+      // If both the old and the new id carry progress, keep the more recent
+      // review rather than silently discarding one.
+      migrated[current] =
+        !existing || (value.lastReviewed ?? '') > (existing.lastReviewed ?? '') ? value : existing;
+    }
+    patch({ deckSize: seeds.length, cardProgress: migrated });
+  };
+
+  const reviewCard = (id: string, grade: RecallGrade) => {
     const prev: CardProgress | undefined = state.cardProgress?.[id];
-    patch({ cardProgress: { ...(state.cardProgress ?? {}), [id]: gradeCard(prev, remembered) } });
+    patch({ cardProgress: { ...(state.cardProgress ?? {}), [id]: gradeCard(prev, grade) } });
   };
   const logDrill = (correct: number, total: number) => {
     const d = today();
@@ -608,7 +644,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       toggleTask, skipTrackItems, addTask, updateTask, deleteTask, rescheduleMissed, reviewKnowledge,
       updateSchedule, setCadence, syncCalendar, addFixedBlock, updateFixedBlock, removeFixedBlock,
       addFeedItem, setFeedStatus, removeFeedItem,
-      setDeckSize, reviewCard, logDrill,
+      setDeckSize, adoptDeck, reviewCard, logDrill,
       addInsight, updateInsight, removeInsight,
       addLesson, updateLesson, removeLesson,
     }),

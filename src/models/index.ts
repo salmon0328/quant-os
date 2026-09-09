@@ -588,6 +588,9 @@ export interface FeedItem {
 // Flashcards (interview drill) & Insights (lightweight research capture)
 // ---------------------------------------------------------------------------
 
+/** Which kind of interview a card belongs to, so the deck can be drilled by target role. */
+export type CardRole = 'quant' | 'markets' | 'ib';
+
 export interface FlashcardSeed {
   deck: string;
   /** Topic taken from the book's own structure (chapter / section heading). */
@@ -600,6 +603,15 @@ export interface FlashcardSeed {
   page?: number;
   /** Result of the validation pass: whether the Q/A pair looks complete. */
   confidence?: 'high' | 'medium' | 'low';
+  role?: CardRole;
+  difficulty?: 'beginner' | 'intermediate' | 'advanced';
+  /**
+   * cardId() hashes the question text, so repairing a mangled question changes
+   * a card's id. These are the ids this card used to have, which lets
+   * hydrate() carry existing SRS progress across a re-clean instead of
+   * silently resetting it.
+   */
+  legacyIds?: string[];
 }
 
 export interface Flashcard {
@@ -616,18 +628,36 @@ export interface Flashcard {
   timesCorrect: number;
   page?: number;
   confidence?: 'high' | 'medium' | 'low';
+  role?: CardRole;
+  difficulty?: 'beginner' | 'intermediate' | 'advanced';
 }
+
+/**
+ * How well a card was recalled. Replaces the old binary remembered/forgot:
+ * "I got it but it took thirty seconds" and "instant" should not earn the same
+ * interval, and that distinction is most of what makes SRS work.
+ */
+export type RecallGrade = 'again' | 'hard' | 'good' | 'easy';
 
 /**
  * Only progress is persisted. Card text lives in the bundled seed module, so the
  * synced state stays small even with a few hundred cards.
  */
 export interface CardProgress {
+  /** Kept for continuity with pre-SM-2 saves; now derived from `interval`. */
   srsStage: number;
   nextReview: string;
   lastReviewed?: string;
   timesSeen: number;
   timesCorrect: number;
+  /** SM-2 ease factor. Absent on older saves — treat as 2.5. */
+  ease?: number;
+  /** Current interval in days. Absent on older saves — derive from srsStage. */
+  interval?: number;
+  /** Consecutive successful reviews; a lapse resets it. */
+  streak?: number;
+  /** How many times this card has been forgotten — surfaces your weak spots. */
+  lapses?: number;
 }
 
 export interface DrillLog {

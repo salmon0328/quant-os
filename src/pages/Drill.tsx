@@ -1,15 +1,23 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useApp } from '../store/AppState';
 import { Card, SectionTitle, Chip, Modal, Field, EmptyState, ProgressBar } from '../components/ui';
-import type { Flashcard, KnowledgeEntry } from '../models';
-import { dueForReview, srsActionFor, SRS_INTERVALS } from '../engine/spacedRepetition';
+import type { CardRole, Flashcard, KnowledgeEntry, RecallGrade } from '../models';
+import { aiAvailable, gradeAnswer, followUp, AiError, type GradeResult, type FollowUpResult } from '../lib/ai';
+import { dueForReview, srsActionFor, intervalPreview, gradeFromScore } from '../engine/spacedRepetition';
 import { today, daysBetween } from '../lib/date';
 import { uid } from '../lib/id';
-import { buildQueue, loadDeck, mergeDeck, topicsOf, positionIn, type DeckFilter, type TopicGroup } from '../data/flashcards';
+import { buildQueue, loadDeck, loadSeeds, mergeDeck, topicsOf, positionIn, type DeckFilter, type TopicGroup } from '../data/flashcards';
 
 const empty: KnowledgeEntry = {
   id: '', concept: '', category: 'Finance', definition: '', intuition: '', formula: '', example: '', commonMistake: '', related: [], srsStage: 0, nextReview: today(),
 };
+
+const ROLES: { key: CardRole | ''; label: string }[] = [
+  { key: '', label: 'All' },
+  { key: 'quant', label: 'Quant' },
+  { key: 'markets', label: 'Markets' },
+  { key: 'ib', label: 'Banking' },
+];
 
 const FILTERS: { key: DeckFilter; label: string }[] = [
   { key: 'all', label: 'Due + new' },
@@ -18,8 +26,8 @@ const FILTERS: { key: DeckFilter; label: string }[] = [
   { key: 'high', label: 'High quality' },
 ];
 
-export default function Knowledge() {
-  const { state, patch, reviewKnowledge, reviewCard, setDeckSize, logDrill } = useApp();
+export default function Drill() {
+  const { state, patch, reviewKnowledge, reviewCard, adoptDeck, logDrill } = useApp();
   const [mode, setMode] = useState<'drill' | 'cards' | 'quiz'>('drill');
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<KnowledgeEntry | null>(null);
@@ -39,8 +47,8 @@ export default function Knowledge() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Knowledge</h1>
-          <p className="text-sm text-slate-400">Drill the interview deck daily · keep concept cards on spaced repetition ({SRS_INTERVALS.join('/')} day intervals).</p>
+          <h1 className="text-2xl font-bold">Interview Drill</h1>
+          <p className="text-sm text-slate-400">Questions pulled from your interview books, on spaced repetition. Type an answer to have it marked, then let the interviewer push back.</p>
         </div>
         <div className="flex gap-1.5">
           <button onClick={() => setMode('drill')} className={`chip ${mode === 'drill' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>Drill</button>
@@ -50,9 +58,9 @@ export default function Knowledge() {
       </div>
 
       {mode === 'drill' ? (
-        <Drill
+        <DrillRunner
           onReview={reviewCard}
-          onDeckSize={setDeckSize}
+          onDeckSize={adoptDeck}
           onLog={logDrill}
           progress={state.cardProgress}
           deckSize={state.deckSize}
@@ -242,11 +250,11 @@ function Quiz({
 
 // --------------------------------------------------------------------- drill
 
-function Drill({
+function DrillRunner({
   onReview, onDeckSize, onLog, progress, deckSize,
 }: {
-  onReview: (id: string, remembered: boolean) => void;
-  onDeckSize: (n: number) => void;
+  onReview: (id: string, grade: RecallGrade) => void;
+  onDeckSize: (seeds: import('../models').FlashcardSeed[]) => void;
   onLog: (correct: number, total: number) => void;
   progress: Record<string, import('../models').CardProgress>;
   deckSize: number;
@@ -256,11 +264,22 @@ function Drill({
   const [size, setSize] = useState(8);
   const [shuffle, setShuffle] = useState(false);
   const [topic, setTopic] = useState('');
+  const [role, setRole] = useState<CardRole | ''>('');
   const [queue, setQueue] = useState<Flashcard[]>([]);
   const [i, setI] = useState(0);
   const [revealed, setRevealed] = useState(false);
   const [score, setScore] = useState<{ correct: number; total: number } | null>(null);
   const [loading, setLoading] = useState(false);
+  // --- typed answers, AI grading and follow-ups (all optional) ---
+  const [typed, setTyped] = useState('');
+  const [graded, setGraded] = useState<GradeResult | null>(null);
+  const [probe, setProbe] = useState<FollowUpResult | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [aiOn, setAiOn] = useState(false);
+  const [missed, setMissed] = useState<Flashcard[]>([]);
+
+  useEffect(() => { void aiAvailable().then(setAiOn); }, []);
 
   // Merged deck: bundled text + persisted progress.
   const cards = useMemo(() => (seeds ? mergeDeck(seeds.map(toSeed), progress) : []), [seeds, progress]);
@@ -268,9 +287,12 @@ function Drill({
   const ensureDeck = useCallback(async () => {
     if (seeds) return seeds;
     setLoading(true);
+    // The raw seeds carry legacyIds, which the merged Flashcard shape drops —
+    // and those are exactly what the progress migration needs.
+    const rawSeeds = await loadSeeds();
     const loaded = await loadDeck();
     setSeeds(loaded);
-    onDeckSize(loaded.length);
+    onDeckSize(rawSeeds);
     setLoading(false);
     return loaded;
   }, [seeds, onDeckSize]);
@@ -278,25 +300,82 @@ function Drill({
   const start = async () => {
     const loaded = await ensureDeck();
     const merged = mergeDeck(loaded.map(toSeed), progress);
-    const next = buildQueue(merged, filter, size, today(), shuffle ? 'shuffle' : 'sequential', topic || undefined);
+    const next = buildQueue(merged, filter, size, today(), shuffle ? 'shuffle' : 'sequential', topic || undefined, role || undefined);
     setQueue(next);
     setI(0);
     setRevealed(false);
     setScore(null);
+    setMissed([]);
+    setTyped('');
+    setGraded(null);
+    setProbe(null);
   };
 
-  const answer = (remembered: boolean) => {
+  const answer = (grade: RecallGrade) => {
     const card = queue[i];
     if (!card) return;
-    onReview(card.id, remembered);
-    setScore((s) => ({ correct: (s?.correct ?? 0) + (remembered ? 1 : 0), total: (s?.total ?? 0) + 1 }));
+    const ok = grade !== 'again';
+    onReview(card.id, grade);
+    setMissed((m) => (ok ? m : [...m, card]));
+    setScore((s) => ({ correct: (s?.correct ?? 0) + (ok ? 1 : 0), total: (s?.total ?? 0) + 1 }));
+    // Reset the per-card AI state so the next card starts clean.
+    setTyped('');
+    setGraded(null);
+    setProbe(null);
+    setAiError(null);
     if (i + 1 >= queue.length) {
-      onLog((score?.correct ?? 0) + (remembered ? 1 : 0), queue.length);
+      onLog((score?.correct ?? 0) + (ok ? 1 : 0), queue.length);
       setQueue([]);
       return;
     }
     setI(i + 1);
     setRevealed(false);
+  };
+
+  /**
+   * Send the typed answer for grading. The whole point of typing it is that
+   * self-grading is generous — you recognise the answer and call it recall.
+   */
+  const submitForGrading = async () => {
+    const card = queue[i];
+    if (!card || !typed.trim()) return;
+    setBusy(true);
+    setAiError(null);
+    try {
+      const result = await gradeAnswer({
+        question: card.question,
+        modelAnswer: card.answer,
+        userAnswer: typed,
+        topic: card.section,
+      });
+      setGraded(result);
+      setRevealed(true);
+    } catch (e) {
+      setAiError(e instanceof AiError ? e.message : 'Grading failed.');
+      setRevealed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** One probing question, the way a real interviewer pushes after a good answer. */
+  const askFollowUp = async () => {
+    const card = queue[i];
+    if (!card) return;
+    setBusy(true);
+    setAiError(null);
+    try {
+      setProbe(await followUp({
+        question: card.question,
+        modelAnswer: card.answer,
+        userAnswer: typed || undefined,
+        topic: card.section,
+      }));
+    } catch (e) {
+      setAiError(e instanceof AiError ? e.message : 'Could not fetch a follow-up.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const stats = useMemo(() => {
@@ -316,7 +395,10 @@ function Drill({
   const card = queue[i];
 
   // Topics in the order they appear in the source books.
-  const topics = useMemo<TopicGroup[]>(() => (seeds ? topicsOf(mergeDeck(seeds.map(toSeed), progress)) : []), [seeds, progress]);
+  const topics = useMemo<TopicGroup[]>(
+    () => topicsOf(role ? cards.filter((c) => c.role === role) : cards),
+    [cards, role]
+  );
   const groupedTopics = useMemo(() => {
     const map = new Map<string, TopicGroup[]>();
     for (const t of topics) {
@@ -367,14 +449,49 @@ function Drill({
             <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">
               Set complete — {last.correct}/{last.total} recalled.
             </div>
-            <p className="mt-1 text-xs text-slate-500">
-              Missed cards drop a stage and come back sooner. That is the point.
-            </p>
+            {/* Naming what you missed is the useful half of a review session;
+                a bare score tells you nothing you can act on. */}
+            {missed.length > 0 ? (
+              <div className="mt-2">
+                <div className="label text-amber-600">Come back to these</div>
+                <ul className="mt-1 space-y-1 text-xs text-slate-600 dark:text-slate-300">
+                  {missed.map((c) => (
+                    <li key={c.id}>
+                      <span className="text-slate-400">{c.section} — </span>{c.question}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="mt-1 text-xs text-slate-500">Clean sweep. Intervals pushed out accordingly.</p>
+            )}
           </Card>
         )}
 
         <Card>
           <SectionTitle>Today's set</SectionTitle>
+          {/* Target role first: the extracted deck is mostly banking content,
+              which is the wrong drill if you are aiming at quant. */}
+          <div className="mb-2">
+            <label className="mb-1 block text-xs text-slate-500">Target role</label>
+            <div className="flex flex-wrap gap-1.5">
+              {ROLES.map((r) => {
+                const count = r.key ? cards.filter((c) => c.role === r.key).length : cards.length;
+                const disabled = count === 0 && r.key !== '';
+                return (
+                  <button
+                    key={r.key || 'all'}
+                    disabled={disabled}
+                    onClick={() => { setRole(r.key); setTopic(''); }}
+                    title={disabled ? 'No cards tagged for this role yet — run scripts/clean_flashcards.py' : undefined}
+                    className={`chip ${role === r.key ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'} ${disabled ? 'cursor-not-allowed opacity-40' : ''}`}
+                  >
+                    {r.label} ({count})
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <div className="mb-3 flex flex-wrap gap-1.5">
             {FILTERS.map((f) => (
               <button key={f.key} onClick={() => setFilter(f.key)} className={`chip ${filter === f.key ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>
@@ -448,21 +565,104 @@ function Drill({
         </div>
         <div className="text-lg font-semibold leading-snug">{card.question}</div>
 
-        {revealed ? (
-          <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-700 dark:bg-slate-800/60 dark:text-slate-200">
-            {card.answer}
-          </div>
-        ) : (
+        {!revealed && (
           <div className="mt-4 rounded-lg border border-dashed border-slate-300 p-3 text-sm text-slate-400 dark:border-slate-700">
             Say the answer out loud first — recall is the exercise, reading isn't.
           </div>
         )}
+
+        {/* Typing the answer is what makes grading honest: recognising a model
+            answer feels like recall and isn't. Only offered when AI is up. */}
+        {aiOn && !revealed && (
+          <div className="mt-3">
+            <textarea
+              className="input w-full"
+              rows={3}
+              placeholder="Optional: type your answer and have it marked against the model answer…"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+            />
+            <button
+              className="btn-ghost mt-2"
+              disabled={busy || !typed.trim()}
+              onClick={() => void submitForGrading()}
+            >
+              {busy ? 'Marking…' : 'Mark my answer'}
+            </button>
+          </div>
+        )}
+
+        {revealed && (
+          <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm leading-relaxed text-slate-700 dark:bg-slate-800/60 dark:text-slate-200">
+            {card.answer}
+          </div>
+        )}
+
+        {graded && (
+          <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 text-sm dark:border-indigo-500/30 dark:bg-indigo-500/10">
+            <div className="font-semibold text-indigo-700 dark:text-indigo-300">
+              {graded.score}/3 — {graded.verdict}
+            </div>
+            {graded.wrong?.length > 0 && (
+              <div className="mt-2">
+                <span className="label text-red-500">Wrong</span>
+                <ul className="list-disc pl-4 text-slate-600 dark:text-slate-300">
+                  {graded.wrong.map((w, k) => <li key={k}>{w}</li>)}
+                </ul>
+              </div>
+            )}
+            {graded.missed?.length > 0 && (
+              <div className="mt-2">
+                <span className="label text-amber-500">Missed</span>
+                <ul className="list-disc pl-4 text-slate-600 dark:text-slate-300">
+                  {graded.missed.map((m, k) => <li key={k}>{m}</li>)}
+                </ul>
+              </div>
+            )}
+            {graded.nitpick && <p className="mt-2 text-xs italic text-slate-500">{graded.nitpick}</p>}
+            <p className="mt-2 text-xs text-slate-500">
+              That scores as <b>{GRADES.find((g) => g.key === gradeFromScore(graded.score))?.label}</b> — but the
+              final call is yours.
+            </p>
+          </div>
+        )}
+
+        {probe && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-sm dark:border-amber-500/30 dark:bg-amber-500/10">
+            <div className="label text-amber-600">Follow-up · {probe.why}</div>
+            <div className="mt-1 font-medium text-slate-800 dark:text-slate-100">{probe.question}</div>
+            <details className="mt-2">
+              <summary className="cursor-pointer text-xs text-slate-500">What they're listening for</summary>
+              <p className="mt-1 text-slate-600 dark:text-slate-300">{probe.answer}</p>
+            </details>
+          </div>
+        )}
+
+        {aiError && <p className="mt-3 text-xs text-amber-600">{aiError} Grade it yourself below.</p>}
       </Card>
 
       {revealed ? (
-        <div className="flex gap-2">
-          <button className="btn-ghost flex-1 text-red-500" onClick={() => answer(false)}>Missed it</button>
-          <button className="btn-primary flex-1" onClick={() => answer(true)}>Got it</button>
+        <div className="space-y-2">
+          {/* Four grades, not two: "got it eventually" and "instant" should not
+              earn the same interval, and that gap is most of what SRS is for. */}
+          <div className="grid grid-cols-4 gap-2">
+            {GRADES.map((g) => (
+              <button
+                key={g.key}
+                className={`btn-ghost flex flex-col items-center py-2 ${g.tone}`}
+                onClick={() => answer(g.key)}
+                title={g.hint}
+              >
+                <span className="text-sm font-semibold">{g.label}</span>
+                <span className="text-[10px] opacity-70">{intervalPreview(progress[card.id], g.key)}</span>
+              </button>
+            ))}
+          </div>
+          {aiOn && !probe && (
+            <button className="btn-ghost w-full text-xs" disabled={busy} onClick={() => void askFollowUp()}>
+              {busy ? 'Thinking…' : 'Push me — ask a follow-up'}
+            </button>
+          )}
         </div>
       ) : (
         <button className="btn-primary w-full" onClick={() => setRevealed(true)}>Show answer</button>
@@ -470,6 +670,14 @@ function Drill({
     </div>
   );
 }
+
+/** Grade buttons. `again` is a lapse; the rest all count as recalled. */
+const GRADES: { key: RecallGrade; label: string; hint: string; tone: string }[] = [
+  { key: 'again', label: 'Again', hint: 'Could not recall it — comes back almost immediately.', tone: 'text-red-500' },
+  { key: 'hard', label: 'Hard', hint: 'Got there, but it was a struggle.', tone: 'text-amber-500' },
+  { key: 'good', label: 'Good', hint: 'Recalled it correctly.', tone: 'text-emerald-500' },
+  { key: 'easy', label: 'Easy', hint: 'Instant — push this one far out.', tone: 'text-indigo-500' },
+];
 
 function toSeed(c: Flashcard) {
   // page + confidence must survive the round-trip, otherwise the deck loses the
