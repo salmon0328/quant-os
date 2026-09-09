@@ -16,9 +16,29 @@ export async function loadSeeds(): Promise<FlashcardSeed[]> {
       import('./flashcards.generated'),
       import('./quantbank.generated'),
     ]);
-    cached = [...book.FLASHCARD_SEEDS, ...quant.QUANT_BANK_SEEDS];
+    cached = dedupe([...book.FLASHCARD_SEEDS, ...quant.QUANT_BANK_SEEDS]);
   }
   return cached;
+}
+
+/**
+ * Drops cards that hash to an id already present.
+ *
+ * The source books overlap — "Walk me through the three financial statements"
+ * appears in both WSP and BIWS — and cardId() hashes the question text, so
+ * those two collide and would share one SRS progress entry. Deduping here
+ * rather than changing the hash keeps every legacyIds mapping intact.
+ *
+ * The fuller answer wins, since the duplicate pair is the same question.
+ */
+function dedupe(seeds: FlashcardSeed[]): FlashcardSeed[] {
+  const byId = new Map<string, FlashcardSeed>();
+  for (const seed of seeds) {
+    const id = cardId(seed);
+    const existing = byId.get(id);
+    if (!existing || seed.answer.length > existing.answer.length) byId.set(id, seed);
+  }
+  return [...byId.values()];
 }
 
 export async function loadDeck(): Promise<Flashcard[]> {
