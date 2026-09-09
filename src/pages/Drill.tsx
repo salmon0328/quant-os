@@ -28,7 +28,7 @@ const FILTERS: { key: DeckFilter; label: string }[] = [
 
 export default function Drill() {
   const { state, patch, reviewKnowledge, reviewCard, adoptDeck, logDrill } = useApp();
-  const [mode, setMode] = useState<'drill' | 'cards' | 'quiz'>('drill');
+  const [mode, setMode] = useState<'drill' | 'mock' | 'cards' | 'quiz'>('drill');
   const [q, setQ] = useState('');
   const [editing, setEditing] = useState<KnowledgeEntry | null>(null);
   const [view, setView] = useState<KnowledgeEntry | null>(null);
@@ -52,6 +52,7 @@ export default function Drill() {
         </div>
         <div className="flex gap-1.5">
           <button onClick={() => setMode('drill')} className={`chip ${mode === 'drill' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>Drill</button>
+          <button onClick={() => setMode('mock')} className={`chip ${mode === 'mock' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>Mock</button>
           <button onClick={() => setMode('cards')} className={`chip ${mode === 'cards' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>Concepts</button>
           <button onClick={() => setMode('quiz')} className={`chip ${mode === 'quiz' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>Quiz</button>
         </div>
@@ -65,6 +66,8 @@ export default function Drill() {
           progress={state.cardProgress}
           deckSize={state.deckSize}
         />
+      ) : mode === 'mock' ? (
+        <Mock onLog={logDrill} />
       ) : mode === 'quiz' ? (
         <Quiz knowledge={state.knowledge} onReview={reviewKnowledge} />
       ) : (
@@ -702,6 +705,307 @@ function Row({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
     <div>
       <div className="label">{k}</div>
       <div className={`text-slate-700 dark:text-slate-200 ${mono ? 'font-mono text-xs' : ''}`}>{v}</div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mock interview
+//
+// The drill is recall practice: one card, reveal, grade. A real technical round
+// is not that. It is timed, you have to speak the whole answer before anyone
+// tells you if you were right, and every answer gets pushed on. This runs that
+// shape: a fixed set from one role, no reveals until the end, follow-ups on,
+// then one scorecard naming what you actually missed.
+// ---------------------------------------------------------------------------
+
+const MOCK_MINUTES = 20;
+const MOCK_QUESTIONS = 6;
+
+interface MockTurn {
+  card: Flashcard;
+  answer: string;
+  grade?: GradeResult;
+  probe?: FollowUpResult;
+  probeAnswer?: string;
+}
+
+function Mock({ onLog }: { onLog: (correct: number, total: number) => void }) {
+  const [role, setRole] = useState<CardRole>('quant');
+  const [turns, setTurns] = useState<MockTurn[]>([]);
+  const [i, setI] = useState(0);
+  const [typed, setTyped] = useState('');
+  const [probeTyped, setProbeTyped] = useState('');
+  const [stage, setStage] = useState<'setup' | 'running' | 'marking' | 'done'>('setup');
+  const [startedAt, setStartedAt] = useState(0);
+  const [now, setNow] = useState(0);
+  const [aiOn, setAiOn] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [available, setAvailable] = useState<{ role: CardRole; n: number }[]>([]);
+
+  useEffect(() => { void aiAvailable().then(setAiOn); }, []);
+
+  // A visible clock is most of what makes a mock feel different from a drill.
+  useEffect(() => {
+    if (stage !== 'running') return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [stage]);
+
+  useEffect(() => {
+    void loadDeck().then((deck) => {
+      setAvailable((['quant', 'markets', 'ib'] as CardRole[]).map((r) => ({
+        role: r,
+        n: deck.filter((c) => c.role === r).length,
+      })));
+    });
+  }, []);
+
+  const begin = async () => {
+    const deck = await loadDeck();
+    const pool = deck.filter((c) => c.role === role);
+    if (pool.length === 0) return;
+    const picked = [...pool].sort(() => Math.random() - 0.5).slice(0, MOCK_QUESTIONS);
+    setTurns(picked.map((card) => ({ card, answer: '' })));
+    setI(0);
+    setTyped('');
+    setProbeTyped('');
+    setStartedAt(Date.now());
+    setNow(Date.now());
+    setStage('running');
+    setError(null);
+  };
+
+  const current = turns[i];
+  const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
+  const remaining = MOCK_MINUTES * 60 - elapsed;
+
+  /** Ask the follow-up mid-interview, without revealing whether the answer was right. */
+  const pushBack = async () => {
+    if (!current || !aiOn) return;
+    try {
+      const probe = await followUp({
+        question: current.card.question,
+        modelAnswer: current.card.answer,
+        userAnswer: typed,
+        topic: current.card.section,
+      });
+      setTurns((t) => t.map((x, k) => (k === i ? { ...x, answer: typed, probe } : x)));
+    } catch {
+      // A failed follow-up must not derail the interview — just move on.
+      setTurns((t) => t.map((x, k) => (k === i ? { ...x, answer: typed } : x)));
+      next();
+    }
+  };
+
+  const next = () => {
+    setTurns((t) => t.map((x, k) => (k === i ? {
+      ...x,
+      answer: x.answer || typed,
+      probeAnswer: probeTyped || undefined,
+    } : x)));
+    setTyped('');
+    setProbeTyped('');
+    if (i + 1 >= turns.length) void finish();
+    else setI(i + 1);
+  };
+
+  /** All marking happens at the end — that is what makes it an interview. */
+  const finish = async () => {
+    setStage('marking');
+    const finished = turns.map((x, k) => (k === i
+      ? { ...x, answer: x.answer || typed, probeAnswer: probeTyped || undefined }
+      : x));
+
+    if (!aiOn) {
+      setTurns(finished);
+      setStage('done');
+      return;
+    }
+
+    try {
+      const graded = await Promise.all(finished.map(async (turn) => {
+        if (!turn.answer.trim()) return turn;
+        try {
+          return {
+            ...turn,
+            grade: await gradeAnswer({
+              question: turn.card.question,
+              modelAnswer: turn.card.answer,
+              userAnswer: turn.answer,
+              topic: turn.card.section,
+            }),
+          };
+        } catch {
+          return turn;
+        }
+      }));
+      setTurns(graded);
+      onLog(graded.filter((t) => (t.grade?.score ?? 0) >= 2).length, graded.length);
+    } catch (e) {
+      setError(e instanceof AiError ? e.message : 'Marking failed — your answers are below.');
+      setTurns(finished);
+    }
+    setStage('done');
+  };
+
+  // ------------------------------------------------------------------ setup
+  if (stage === 'setup') {
+    const count = available.find((a) => a.role === role)?.n ?? 0;
+    return (
+      <Card>
+        <SectionTitle>Mock interview</SectionTitle>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          {MOCK_QUESTIONS} questions, {MOCK_MINUTES} minutes, no answers shown until the end.
+          Type your answer as you would say it out loud. You get pushed on each one, and a
+          scorecard at the finish.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {available.map((a) => (
+            <button
+              key={a.role}
+              disabled={a.n === 0}
+              onClick={() => setRole(a.role)}
+              className={`chip ${role === a.role ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'} ${a.n === 0 ? 'cursor-not-allowed opacity-40' : ''}`}
+            >
+              {a.role} ({a.n})
+            </button>
+          ))}
+        </div>
+        {!aiOn && (
+          <p className="mt-3 text-xs text-amber-600">
+            AI is off, so answers will not be marked — you will still get the questions under
+            the clock, with the model answers at the end.
+          </p>
+        )}
+        <button className="btn-primary mt-3" disabled={count === 0} onClick={() => void begin()}>
+          {count === 0 ? 'No cards tagged for this role yet' : 'Start the interview'}
+        </button>
+      </Card>
+    );
+  }
+
+  // ---------------------------------------------------------------- marking
+  if (stage === 'marking') {
+    return <Card className="text-center"><div className="py-6 text-sm text-slate-500">Marking your answers…</div></Card>;
+  }
+
+  // ------------------------------------------------------------------- done
+  if (stage === 'done') {
+    const marked = turns.filter((t) => t.grade);
+    const avg = marked.length
+      ? marked.reduce((a, t) => a + (t.grade?.score ?? 0), 0) / marked.length
+      : null;
+    return (
+      <div className="space-y-4">
+        <Card>
+          <SectionTitle>Scorecard</SectionTitle>
+          <div className="grid grid-cols-3 gap-3">
+            <Stat label="Questions" value={turns.length} />
+            <Stat label="Time" value={`${Math.floor(elapsed / 60)}m ${elapsed % 60}s`} />
+            <Stat
+              label="Average"
+              value={avg === null ? '—' : `${avg.toFixed(1)}/3`}
+              color={avg === null ? undefined : avg >= 2 ? '#10b981' : '#f59e0b'}
+            />
+          </div>
+          {error && <p className="mt-2 text-xs text-amber-600">{error}</p>}
+          <button className="btn-ghost mt-3" onClick={() => setStage('setup')}>Run another</button>
+        </Card>
+
+        {turns.map((t, k) => (
+          <Card key={t.card.id}>
+            <div className="flex flex-wrap items-center gap-2">
+              <Chip tone="career">{t.card.section}</Chip>
+              {t.grade && (
+                <span className={`text-xs font-bold ${t.grade.score >= 2 ? 'text-emerald-500' : 'text-amber-500'}`}>
+                  {t.grade.score}/3
+                </span>
+              )}
+              <span className="text-[10px] text-slate-400">Q{k + 1}</span>
+            </div>
+            <div className="mt-1 font-medium text-slate-800 dark:text-slate-100">{t.card.question}</div>
+
+            <div className="mt-2 rounded bg-slate-50 p-2 text-xs dark:bg-slate-800/60">
+              <span className="label">You said</span>
+              <p className="text-slate-600 dark:text-slate-300">{t.answer || <i>no answer given</i>}</p>
+            </div>
+
+            {t.grade && (
+              <div className="mt-2 text-xs">
+                <p className="text-slate-600 dark:text-slate-300">{t.grade.verdict}</p>
+                {t.grade.wrong?.length > 0 && (
+                  <ul className="mt-1 list-disc pl-4 text-red-500">
+                    {t.grade.wrong.map((w, j) => <li key={j}>{w}</li>)}
+                  </ul>
+                )}
+                {t.grade.missed?.length > 0 && (
+                  <ul className="mt-1 list-disc pl-4 text-amber-600">
+                    {t.grade.missed.map((mm, j) => <li key={j}>{mm}</li>)}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            <details className="mt-2">
+              <summary className="cursor-pointer text-xs text-indigo-500">Model answer</summary>
+              <p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-slate-300">{t.card.answer}</p>
+            </details>
+          </Card>
+        ))}
+      </div>
+    );
+  }
+
+  // ---------------------------------------------------------------- running
+  const overtime = remaining <= 0;
+  return (
+    <div className="space-y-3">
+      <Card className={overtime ? 'border-red-300 dark:border-red-500/40' : undefined}>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-slate-400">Question {i + 1} of {turns.length}</span>
+          <span className={`font-mono text-sm ${overtime ? 'text-red-500' : remaining < 180 ? 'text-amber-500' : 'text-slate-400'}`}>
+            {overtime ? '+' : ''}{Math.floor(Math.abs(remaining) / 60)}:{String(Math.abs(remaining) % 60).padStart(2, '0')}
+          </span>
+        </div>
+        <div className="mt-2 text-lg font-semibold leading-snug">{current?.card.question}</div>
+
+        <textarea
+          className="input mt-3 w-full"
+          rows={5}
+          placeholder="Answer as you would say it out loud…"
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+        />
+
+        {current?.probe && (
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/60 p-3 dark:border-amber-500/30 dark:bg-amber-500/10">
+            <div className="label text-amber-600">Follow-up</div>
+            <div className="mt-1 text-sm font-medium text-slate-800 dark:text-slate-100">{current.probe.question}</div>
+            <textarea
+              className="input mt-2 w-full"
+              rows={3}
+              placeholder="And your answer to that…"
+              value={probeTyped}
+              onChange={(e) => setProbeTyped(e.target.value)}
+            />
+          </div>
+        )}
+      </Card>
+
+      <div className="flex gap-2">
+        {aiOn && !current?.probe && (
+          <button className="btn-ghost flex-1" disabled={!typed.trim()} onClick={() => void pushBack()}>
+            Submit &amp; take the follow-up
+          </button>
+        )}
+        <button className="btn-primary flex-1" onClick={next}>
+          {i + 1 >= turns.length ? 'Finish & mark' : 'Next question'}
+        </button>
+      </div>
+      <p className="text-center text-xs text-slate-400">
+        No answers until the end — that is the point.
+      </p>
     </div>
   );
 }

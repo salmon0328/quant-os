@@ -216,7 +216,7 @@ def clean_one(card: dict, usage: llm.Usage, model: str | None) -> dict | None:
         ),
         model=model,
         tier="smart",
-        max_tokens=1200,
+        max_tokens=2000,
         usage=usage,
     )
     if not isinstance(out, dict) or not out.get("ok"):
@@ -224,6 +224,10 @@ def clean_one(card: dict, usage: llm.Usage, model: str | None) -> dict | None:
     question = (out.get("question") or "").strip()
     answer = (out.get("answer") or "").strip()
     if len(question) < 10 or len(answer) < MIN_ANSWER:
+        return None
+    # A truncated answer is worse than no card: it reads as complete and
+    # teaches half a mechanism. Require terminal punctuation.
+    if answer.rstrip()[-1] not in ".!?)\"'":
         return None
     return {
         **card,

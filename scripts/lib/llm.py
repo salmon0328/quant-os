@@ -29,6 +29,11 @@ DEFAULT_BASE_URL = "http://localhost:20128/v1"
 TIMEOUT_S = 120
 MAX_ATTEMPTS = 5
 
+# Thinking models spend part of max_tokens on reasoning before emitting any
+# content. Without headroom a request that "should" fit returns truncated JSON
+# or nothing at all, which looks like a broken model rather than a budget.
+REASONING_HEADROOM = 1500
+
 
 class LlmError(RuntimeError):
     """Raised when a call fails in a way retrying will not fix."""
@@ -181,7 +186,7 @@ def chat(
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "max_tokens": max_tokens,
+        "max_tokens": max_tokens + REASONING_HEADROOM,
         "temperature": temperature if temperature is not None else (0.2 if want_json else 0.6),
     }
     if want_json:

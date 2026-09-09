@@ -10,8 +10,13 @@ let cached: FlashcardSeed[] | null = null;
  */
 export async function loadSeeds(): Promise<FlashcardSeed[]> {
   if (!cached) {
-    const mod = await import('./flashcards.generated');
-    cached = mod.FLASHCARD_SEEDS;
+    // Both decks are lazily imported together: the extracted book cards and the
+    // purpose-built quant bank that rebalances them.
+    const [book, quant] = await Promise.all([
+      import('./flashcards.generated'),
+      import('./quantbank.generated'),
+    ]);
+    cached = [...book.FLASHCARD_SEEDS, ...quant.QUANT_BANK_SEEDS];
   }
   return cached;
 }
