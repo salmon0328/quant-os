@@ -291,6 +291,9 @@ def main() -> int:
         except llm.LlmError as e:
             print(f"[{n}/{len(pending)}] ! {e}")
             continue
+        except Exception as e:  # noqa: BLE001 - one bad card must not end the run
+            print(f"[{n}/{len(pending)}] ! unexpected {type(e).__name__}: {e}")
+            continue
 
         if cleaned is None:
             dropped.append({"id": key, "question": card["question"][:200], "deck": card.get("deck")})

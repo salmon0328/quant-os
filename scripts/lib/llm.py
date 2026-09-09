@@ -86,16 +86,59 @@ def model_for(tier: str) -> str:
     return os.environ.get("LLM_MODEL_FAST", "ag/gemini-3.8-flash")
 
 
+# JSON permits "\\/bfnrtu after a backslash. Models writing formulas emit things
+# like "\(", "\frac" and "\d" inside strings, which is invalid JSON and crashed a
+# 749-card run on card 703.
+#
+# \b and \f are deliberately excluded: they are legal JSON but a backspace or
+# formfeed is never what a prose answer means, whereas "\frac" and "\beta"
+# certainly are.
+_VALID_ESCAPES = set('"\\/nrtu')
+
+
+def repair_escapes(text: str) -> str:
+    """Doubles backslashes that are not part of a valid JSON escape."""
+    out = []
+    in_string = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == '"' and (i == 0 or text[i - 1] != "\\"):
+            in_string = not in_string
+            out.append(ch)
+            i += 1
+            continue
+        if in_string and ch == "\\" and i + 1 < len(text):
+            nxt = text[i + 1]
+            if nxt in _VALID_ESCAPES:
+                out.append(ch)
+                out.append(nxt)
+            else:
+                # Not a legal escape -- treat it as a literal backslash.
+                out.append("\\\\")
+                out.append(nxt)
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def parse_json_loose(raw: str) -> Any:
     """Models wrap JSON in fences or prose often enough to need this.
 
-    Falls back to extracting the outermost balanced object/array.
+    Falls back to extracting the outermost balanced object/array, and repairs
+    illegal backslash escapes before giving up.
     """
     text = raw.strip()
     text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
     text = re.sub(r"```\s*$", "", text)
     try:
         return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    try:
+        return json.loads(repair_escapes(text))
     except json.JSONDecodeError:
         pass
 
@@ -126,7 +169,14 @@ def parse_json_loose(raw: str) -> Any:
         elif ch == closer:
             depth -= 1
             if depth == 0:
-                return json.loads(text[start : i + 1])
+                candidate = text[start : i + 1]
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    try:
+                        return json.loads(repair_escapes(candidate))
+                    except json.JSONDecodeError as exc:
+                        raise LlmError(f"model returned unparseable JSON: {exc}") from exc
     raise LlmError("model returned unbalanced JSON")
 
 
