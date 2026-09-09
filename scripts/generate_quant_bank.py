@@ -33,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import llm  # noqa: E402
+from lib.detex import detex  # noqa: E402
 
 OUT_PATH = Path("src/data/quantbank.generated.ts")
 CHECKPOINT = Path("scripts/.quantbank_checkpoint.json")
@@ -203,8 +204,10 @@ def main() -> int:
             if a[-1] not in ".!?)\"'":
                 continue
             cards.append({
-                "question": q,
-                "answer": a,
+                # Models emit LaTeX on the harder topics despite the prompt;
+                # the drill renders plain text.
+                "question": detex(q),
+                "answer": detex(a),
                 "section": (r.get("topic") or topic).strip(),
                 "difficulty": r.get("difficulty", difficulty),
             })

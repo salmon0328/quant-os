@@ -40,6 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib import llm  # noqa: E402
+from lib.detex import detex  # noqa: E402
 
 SEEDS_PATH = Path("src/data/flashcards.generated.ts")
 OUT_PATH = Path("src/data/flashcards.generated.ts")
@@ -231,8 +232,10 @@ def clean_one(card: dict, usage: llm.Usage, model: str | None) -> dict | None:
         return None
     return {
         **card,
-        "question": question,
-        "answer": answer,
+        # The prompt asks for plain-text formulas; models fall back to LaTeX on
+        # hard topics anyway, and the drill renders plain text.
+        "question": detex(question),
+        "answer": detex(answer),
         "section": (out.get("topic") or card.get("section") or "").strip(),
         "role": out.get("role"),
         "difficulty": out.get("difficulty"),
