@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useReducer, useRe
 import type {
   AppState, CardProgress, EnergyMode, FeedItem, FixedBlock, Insight,
   ScheduleSettings, Task, TaskStatus, TrackId, KnowledgeEntry, DayLog, Lesson, RecallGrade,
-  FlashcardSeed, BookProgress, BookStatus,
+  FlashcardSeed, BookProgress, BookStatus, QuizResult,
 } from '../models';
 import { DEFAULT_SCHEDULE } from '../models';
 import { PILLARS } from '../data/pillars';
@@ -11,6 +11,7 @@ import { PROJECTS } from '../data/projects';
 import { KNOWLEDGE } from '../data/knowledge';
 import { LESSONS } from '../data/lessons';
 import { today, mondayOf, addDays } from '../lib/date';
+import { uid } from '../lib/id';
 import { generateTasks, scheduleExisting } from '../engine/taskGenerator';
 import { completeItems, skipItems, uncompleteItems } from '../engine/tracks';
 import { chaptersOf, EMPTY_BOOK_PROGRESS } from '../data/books';
@@ -250,6 +251,10 @@ interface Ctx {
   removeFeedItem: (id: string) => void;
   // v2: drill
   setDeckSize: (n: number) => void;
+  recordQuiz: (
+    moduleId: string,
+    result: { correct: number; total: number; ms: number; missedIds: string[]; concepts: string[] }
+  ) => void;
   setBookProgress: (bookId: string, patch: Partial<BookProgress>) => void;
   tickChapter: (bookId: string, chapter: number) => void;
   adoptDeck: (seeds: FlashcardSeed[]) => void;
@@ -633,6 +638,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     patch({ deckSize: seeds.length, cardProgress: migrated });
   };
 
+  // ------------------------------------------------------------------- learn
+
+  /**
+   * Records a quiz attempt and re-queues what was missed.
+   *
+   * This is what makes Learn and Drill one system rather than two: a concept
+   * you just failed a quiz question on is scheduled for spaced review, instead
+   * of the failure being a number you scroll past.
+   */
+  const recordQuiz = (
+    moduleId: string,
+    result: { correct: number; total: number; ms: number; missedIds: string[]; concepts: string[] }
+  ) => {
+    const entry: QuizResult = {
+      id: uid('qz-'),
+      moduleId,
+      date: today(),
+      correct: result.correct,
+      total: result.total,
+      ms: result.ms,
+      missedIds: result.missedIds,
+    };
+
+    // Pull the matching concept cards back to the front of the review queue.
+    const concepts = result.concepts.map((c) => c.toLowerCase());
+    const knowledge = concepts.length === 0 ? state.knowledge : state.knowledge.map((k) =>
+      concepts.some((c) => k.concept.toLowerCase().includes(c) || c.includes(k.concept.toLowerCase()))
+        ? { ...k, srsStage: 0, nextReview: today() }
+        : k
+    );
+
+    patch({ quizResults: [entry, ...(state.quizResults ?? [])].slice(0, 500), knowledge });
+  };
+
   // ------------------------------------------------------------------ books
 
   const setBookProgress = (bookId: string, patchIn: Partial<BookProgress>) => {
@@ -722,7 +761,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       toggleTask, skipTrackItems, addTask, updateTask, deleteTask, rescheduleMissed, reviewKnowledge,
       updateSchedule, setCadence, syncCalendar, addFixedBlock, updateFixedBlock, removeFixedBlock,
       addFeedItem, setFeedStatus, removeFeedItem,
-      setDeckSize, setBookProgress, tickChapter, adoptDeck, reviewCard, logDrill,
+      setDeckSize, recordQuiz, setBookProgress, tickChapter, adoptDeck, reviewCard, logDrill,
       addInsight, updateInsight, removeInsight,
       addLesson, updateLesson, removeLesson,
     }),

@@ -191,6 +191,93 @@ export interface Lesson {
 }
 
 // ---------------------------------------------------------------------------
+// Learn: Subject -> Module -> activities
+//
+// The Learn page was a reader over six lessons. A module is the unit that
+// actually teaches something: the explanation, the vocabulary, a quiz that
+// checks it stuck, and an exercise you run.
+// ---------------------------------------------------------------------------
+
+export type SubjectId =
+  | 'probability'
+  | 'statistics'
+  | 'markets'
+  | 'derivatives'
+  | 'fixed-income'
+  | 'quant-methods'
+  | 'machine-learning'
+  | 'algorithms'
+  | 'programming'
+  | 'microstructure';
+
+export interface Subject {
+  id: SubjectId;
+  name: string;
+  blurb: string;
+  icon: string;
+  order: number;
+}
+
+export type QuizKind = 'mcq' | 'numeric' | 'free';
+
+export interface QuizQuestion {
+  id: string;
+  kind: QuizKind;
+  prompt: string;
+  /** mcq only. */
+  choices?: string[];
+  answerIndex?: number;
+  /** numeric: the expected value. free: the model answer to grade against. */
+  answer?: string;
+  /** numeric only — absolute tolerance, defaults to a relative 1%. */
+  tolerance?: number;
+  explanation: string;
+  /** Glossary term this checks, so a miss can be re-queued for review. */
+  concept?: string;
+}
+
+/** A runnable exercise. Tests are Python asserts executed in the browser. */
+export interface Exercise {
+  id: string;
+  title: string;
+  prompt: string;
+  starterCode: string;
+  solution: string;
+  /** Assertions appended to the user's code; passing means the exercise is done. */
+  tests: string;
+  hint?: string;
+}
+
+export interface ModuleBookRef {
+  bookId: string;
+  chapter: number;
+}
+
+export interface Module {
+  id: string;
+  subjectId: SubjectId;
+  title: string;
+  summary: string;
+  order: number;
+  difficulty: LessonDifficulty;
+  estMinutes: number;
+  tags: string[];
+  /** Module ids that should be done first. */
+  prereqs: string[];
+  /** Long-form teaching text — same renderer as the old Lesson.elaboration. */
+  elaboration: string;
+  keyNotes: string[];
+  glossary: { term: string; definition: string }[];
+  quiz: QuizQuestion[];
+  exercises: Exercise[];
+  /** Problems from the LeetCode catalogue that practise this module. */
+  leetcodeIds: string[];
+  bookRefs: ModuleBookRef[];
+  videos: VideoLink[];
+  sources: LessonSource[];
+}
+
+// ---------------------------------------------------------------------------
 // Aptitude Lab - the speed/pattern drills proprietary trading screens use
 // (the "80 questions in 8 minutes" style test, number series, reaction time)
 // ---------------------------------------------------------------------------

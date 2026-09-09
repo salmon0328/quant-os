@@ -1,423 +1,304 @@
-import React, { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useApp } from '../store/AppState';
-import { PILLARS } from '../data/pillars';
-import type { Lesson, LessonDifficulty, PracticeQuestion, VideoLink, LessonSource, PillarId } from '../models';
-import { Card, Chip, ProgressBar, Modal, Field, EmptyState } from '../components/ui';
+import { SUBJECTS } from '../data/syllabus';
+import { MODULES, modulesFor, isWritten, unmetPrereqs } from '../data/modules';
+import { LEETCODE, leetcodeUrl, neetcodeUrl } from '../data/tracks/leetcode';
+import { BOOK_BY_ID, chaptersOf } from '../data/books';
+import type { Module, SubjectId } from '../models';
+import { Card, Chip, ProgressBar, Modal, EmptyState, SectionTitle } from '../components/ui';
+import { CodeRunner } from '../components/CodeRunner';
+import { Quiz } from '../components/Quiz';
+import { RichText } from '../components/RichText';
 
-type RichBlock = { type: 'p' | 'ul'; items: string[] };
-
-function renderRich(blocks: RichBlock[]) {
-  return blocks.map((b, i) =>
-    b.type === 'ul' ? (
-      <ul key={i} className="list-disc space-y-1 pl-5">
-        {b.items.map((it, j) => (
-          <li key={j}>{it}</li>
-        ))}
-      </ul>
-    ) : (
-      <p key={i} className="text-sm leading-relaxed text-slate-600 dark:text-slate-300">
-        {b.items[0]}
-      </p>
-    )
-  );
-}
-
-function toBlocks(text: string): RichBlock[] {
-  return text
-    .split('\n\n')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((para): RichBlock => {
-      const lines = para.split('\n');
-      if (lines.length > 1 && lines.every((l) => /^- /.test(l.trim()))) {
-        return { type: 'ul', items: lines.map((l) => l.trim().replace(/^- /, '')) };
-      }
-      return { type: 'p', items: [para] };
-    });
-}
-
-function RichText({ text }: { text: string }) {
-  return <div className="space-y-3">{renderRich(toBlocks(text))}</div>;
-}
-
-const DIFF_TONE: Record<LessonDifficulty, string> = {
+const DIFF_TONE: Record<string, string> = {
   beginner: 'academics',
   intermediate: 'programming',
   advanced: 'finance',
 };
 
-function newLesson(trackId: PillarId): Lesson {
-  return {
-    id: `usr-${Date.now()}`,
-    trackId,
-    title: '',
-    summary: '',
-    difficulty: 'beginner',
-    tags: [],
-    elaboration: '',
-    keyNotes: [],
-    practice: [],
-    videos: [],
-    sources: [],
-    estMinutes: 10,
-    order: 999,
-    createdAt: new Date().toISOString(),
-  };
-}
+type Tab = 'lesson' | 'quiz' | 'practice' | 'links';
 
 export default function Learn() {
-  const { state, addLesson, updateLesson, removeLesson, patch } = useApp();
-  const lessons = state.lessons ?? [];
+  const { state, patch, recordQuiz } = useApp();
   const progress = state.learnProgress ?? {};
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [subject, setSubject] = useState<SubjectId | 'all'>('all');
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [draft, setDraft] = useState<Lesson | null>(null);
-  const [importMsg, setImportMsg] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const open = openId ? MODULES.find((m) => m.id === openId) ?? null : null;
 
-  const byPillar = useMemo(() => {
-    return PILLARS.map((p) => ({
-      pillar: p,
-      items: lessons
-        .filter((l) => l.trackId === p.id)
-        .sort((a, b) => a.order - b.order),
-    })).filter((g) => g.items.length > 0);
-  }, [lessons]);
+  const subjects = useMemo(
+    () => SUBJECTS.filter((s) => subject === 'all' || s.id === subject).sort((a, b) => a.order - b.order),
+    [subject]
+  );
 
-  const selected = lessons.find((l) => l.id === selectedId) ?? null;
+  const doneCount = MODULES.filter((m) => progress[m.id]).length;
+  const writtenCount = MODULES.filter(isWritten).length;
 
-  const toggleComplete = (id: string) =>
-    patch({ learnProgress: { ...progress, [id]: !progress[id] } });
-
-  const openNew = () => {
-    setDraft(newLesson((selected?.trackId ?? byPillar[0]?.pillar.id ?? 'finance') as PillarId));
-    setEditorOpen(true);
-  };
-  const openEdit = (l: Lesson) => {
-    setDraft({ ...l, keyNotes: [...l.keyNotes], practice: l.practice.map((x) => ({ ...x })), videos: l.videos.map((v) => ({ ...v })), sources: l.sources.map((s) => ({ ...s })) });
-    setEditorOpen(true);
-  };
-
-  const saveDraft = () => {
-    if (!draft || !draft.title.trim()) return;
-    const existing = lessons.some((l) => l.id === draft.id);
-    if (existing) updateLesson(draft);
-    else addLesson(draft);
-    setEditorOpen(false);
-    setDraft(null);
-  };
-
-  const onImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const raw = JSON.parse(await file.text());
-      const arr: Lesson[] = Array.isArray(raw) ? raw : raw.lessons ?? [];
-      let n = 0;
-      for (const l of arr) {
-        if (l && l.title && l.trackId) {
-          addLesson({ ...l, id: l.id?.startsWith('usr-') ? l.id : `usr-${Date.now()}-${n}`, order: l.order ?? 999 });
-          n++;
-        }
-      }
-      setImportMsg(`Imported ${n} lesson${n === 1 ? '' : 's'}.`);
-    } catch {
-      setImportMsg('Could not parse that file — expected a JSON array of lessons.');
-    } finally {
-      if (fileRef.current) fileRef.current.value = '';
-    }
-  };
+  const toggleDone = (id: string) => patch({ learnProgress: { ...progress, [id]: !progress[id] } });
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Learn</h1>
-          <p className="mt-1 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
-            A one-stop reader that teaches each concept in depth — elaboration, key notes, practice
-            questions, and curated video/source links. Add your own lessons, or generate a whole
-            library from your books with <code className="text-xs">scripts/generate_lessons.py</code>.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <input ref={fileRef} type="file" accept="application/json" className="hidden" onChange={onImport} />
-          <button className="btn btn-ghost" onClick={() => fileRef.current?.click()}>Import .json</button>
-          <button className="btn btn-primary" onClick={openNew}>+ New lesson</button>
-        </div>
+      <div>
+        <h1 className="text-2xl font-bold">Learn</h1>
+        <p className="text-sm text-slate-400">
+          One place for the technical ground a quant or markets role needs — read it, get quizzed on
+          it, then write code against it. Algorithms link straight through to the exact LeetCode
+          problems.
+        </p>
       </div>
 
-      {importMsg && (
-        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-300">
-          {importMsg}
-        </div>
+      <div className="grid grid-cols-3 gap-3">
+        <Card><div className="label">Modules done</div><div className="mt-1 text-2xl font-bold text-emerald-500">{doneCount}<span className="text-sm font-normal text-slate-400">/{MODULES.length}</span></div></Card>
+        <Card><div className="label">Subjects</div><div className="mt-1 text-2xl font-bold">{SUBJECTS.length}</div></Card>
+        <Card><div className="label">With content</div><div className="mt-1 text-2xl font-bold text-indigo-500">{writtenCount}<span className="text-sm font-normal text-slate-400">/{MODULES.length}</span></div></Card>
+      </div>
+
+      {writtenCount === 0 && (
+        <Card className="border-amber-200 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-500/10">
+          <p className="text-sm text-amber-800 dark:text-amber-300">
+            The syllabus is here but the lessons are not written yet. Run{' '}
+            <code className="text-xs">python3 scripts/generate_modules.py</code> to fill them in.
+            Module links, prerequisites and LeetCode connections all work meanwhile.
+          </p>
+        </Card>
       )}
 
-      {byPillar.length === 0 && (
-        <EmptyState>No lessons yet — add one, import a JSON, or generate from your reading list.</EmptyState>
-      )}
+      <div className="flex flex-wrap gap-1.5">
+        <button onClick={() => setSubject('all')} className={`chip ${subject === 'all' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>All</button>
+        {SUBJECTS.map((s) => (
+          <button key={s.id} onClick={() => setSubject(s.id)} className={`chip ${subject === s.id ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}>
+            {s.icon} {s.name}
+          </button>
+        ))}
+      </div>
 
-      {byPillar.map(({ pillar, items }) => {
-        const done = items.filter((l) => progress[l.id]).length;
+      {subjects.map((s) => {
+        const mods = modulesFor(s.id);
+        const done = mods.filter((m) => progress[m.id]).length;
         return (
-          <Card key={pillar.id} className="p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="h-3 w-3 rounded-full" style={{ background: pillar.color }} />
-                <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{pillar.name}</h2>
-                <span className="text-xs text-slate-400">{done}/{items.length}</span>
+          <Card key={s.id}>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{s.icon} {s.name}</h2>
+                <p className="text-xs text-slate-400">{s.blurb}</p>
               </div>
               <div className="w-40">
-                <ProgressBar value={(done / Math.max(1, items.length)) * 100} color={pillar.color} />
+                <div className="mb-1 text-right text-xs text-slate-400">{done}/{mods.length}</div>
+                <ProgressBar value={(done / Math.max(1, mods.length)) * 100} />
               </div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {items.map((l) => (
-                <button
-                  key={l.id}
-                  onClick={() => setSelectedId(l.id)}
-                  className="group rounded-xl border border-slate-200 p-3 text-left transition hover:border-indigo-400 hover:shadow-sm dark:border-slate-800"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="font-medium text-slate-800 dark:text-slate-100">{l.title}</div>
-                    {progress[l.id] && <span className="text-emerald-500">✓</span>}
-                  </div>
-                  <p className="mt-1 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{l.summary}</p>
-                  <div className="mt-2 flex flex-wrap items-center gap-1">
-                    <Chip tone={DIFF_TONE[l.difficulty]}>{l.difficulty}</Chip>
-                    <span className="text-xs text-slate-400">· {l.estMinutes} min</span>
-                    {l.tags.slice(0, 3).map((t) => (
-                      <span key={t} className="chip bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">#{t}</span>
-                    ))}
-                  </div>
-                </button>
-              ))}
+            <div className="grid gap-2 sm:grid-cols-2">
+              {mods.map((m) => {
+                const blocked = unmetPrereqs(m, progress);
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => setOpenId(m.id)}
+                    className="rounded-xl border border-slate-200 p-3 text-left transition hover:border-indigo-400 hover:shadow-sm dark:border-slate-800"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-medium text-slate-800 dark:text-slate-100">{m.title}</span>
+                      {progress[m.id] && <span className="text-emerald-500">✓</span>}
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{m.summary}</p>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <Chip tone={DIFF_TONE[m.difficulty]}>{m.difficulty}</Chip>
+                      <span className="text-[10px] text-slate-400">{m.estMinutes}m</span>
+                      {m.quiz.length > 0 && <span className="text-[10px] text-indigo-400">{m.quiz.length} quiz</span>}
+                      {m.exercises.length > 0 && <span className="text-[10px] text-emerald-500">{m.exercises.length} code</span>}
+                      {m.leetcodeIds.length > 0 && <span className="text-[10px] text-amber-500">{m.leetcodeIds.length} LC</span>}
+                      {!isWritten(m) && <span className="text-[10px] text-slate-400">outline only</span>}
+                    </div>
+                    {blocked.length > 0 && (
+                      <p className="mt-1 text-[10px] text-amber-500">First: {blocked.map((b) => b.title).join(', ')}</p>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </Card>
         );
       })}
 
-      {/* Lesson reader */}
-      <Modal open={!!selected} onClose={() => setSelectedId(null)} title={selected?.title ?? ''} wide>
-        {selected && (
-          <div className="space-y-5">
-            <div className="flex flex-wrap items-center gap-2">
-              <Chip tone={DIFF_TONE[selected.difficulty]}>{selected.difficulty}</Chip>
-              <span className="text-xs text-slate-400">~{selected.estMinutes} min</span>
-              {selected.tags.map((t) => (
-                <span key={t} className="chip bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">#{t}</span>
-              ))}
+      <ModuleModal
+        module={open}
+        done={!!(open && progress[open.id])}
+        onClose={() => setOpenId(null)}
+        onToggleDone={() => open && toggleDone(open.id)}
+        onQuizFinish={(r) => open && recordQuiz(open.id, r)}
+      />
+    </div>
+  );
+}
+
+function ModuleModal({
+  module: mod, done, onClose, onToggleDone, onQuizFinish,
+}: {
+  module: Module | null;
+  done: boolean;
+  onClose: () => void;
+  onToggleDone: () => void;
+  onQuizFinish: (r: { correct: number; total: number; ms: number; missedIds: string[]; concepts: string[] }) => void;
+}) {
+  const [tab, setTab] = useState<Tab>('lesson');
+  if (!mod) return null;
+
+  const problems = mod.leetcodeIds
+    .map((id) => LEETCODE.find((p) => p.id === id))
+    .filter((p): p is NonNullable<typeof p> => !!p);
+
+  const TABS: { key: Tab; label: string; n?: number }[] = [
+    { key: 'lesson', label: 'Lesson' },
+    { key: 'quiz', label: 'Quiz', n: mod.quiz.length },
+    { key: 'practice', label: 'Practice', n: mod.exercises.length + problems.length },
+    { key: 'links', label: 'Sources' },
+  ];
+
+  return (
+    <Modal open onClose={onClose} title={mod.title} wide>
+      <div className="max-h-[74vh] space-y-4 overflow-y-auto pr-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <Chip tone={DIFF_TONE[mod.difficulty]}>{mod.difficulty}</Chip>
+          <span className="text-xs text-slate-400">~{mod.estMinutes} min</span>
+          {mod.tags.map((t) => (
+            <span key={t} className="chip bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">#{t}</span>
+          ))}
+        </div>
+        <p className="text-sm italic text-slate-500 dark:text-slate-400">{mod.summary}</p>
+
+        <div className="flex flex-wrap gap-1.5 border-b border-slate-200 pb-2 dark:border-slate-800">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`chip ${tab === t.key ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}
+            >
+              {t.label}{t.n !== undefined && t.n > 0 ? ` (${t.n})` : ''}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'lesson' && (
+          mod.elaboration ? (
+            <div className="space-y-4">
+              <RichText text={mod.elaboration} />
+              {mod.keyNotes.length > 0 && (
+                <section>
+                  <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Key notes</h3>
+                  <ul className="list-disc space-y-1 pl-5 text-sm text-slate-600 dark:text-slate-300">
+                    {mod.keyNotes.map((n, i) => <li key={i}>{n}</li>)}
+                  </ul>
+                </section>
+              )}
+              {mod.glossary.length > 0 && (
+                <section>
+                  <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Glossary</h3>
+                  <dl className="space-y-1.5 text-sm">
+                    {mod.glossary.map((g) => (
+                      <div key={g.term}>
+                        <dt className="font-medium text-slate-700 dark:text-slate-200">{g.term}</dt>
+                        <dd className="text-slate-600 dark:text-slate-400">{g.definition}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </section>
+              )}
             </div>
-            <p className="text-sm italic text-slate-500 dark:text-slate-400">{selected.summary}</p>
+          ) : (
+            <EmptyState>
+              Not written yet — run <code className="text-xs">scripts/generate_modules.py</code>.
+              The practice links below work regardless.
+            </EmptyState>
+          )
+        )}
 
-            <section>
-              <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Elaboration</h3>
-              <RichText text={selected.elaboration} />
-            </section>
+        {tab === 'quiz' && <Quiz key={mod.id} module={mod} onFinish={onQuizFinish} />}
 
-            {selected.keyNotes.length > 0 && (
+        {tab === 'practice' && (
+          <div className="space-y-4">
+            {problems.length > 0 && (
               <section>
-                <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Key notes</h3>
-                <ul className="list-disc space-y-1 pl-5 text-sm text-slate-600 dark:text-slate-300">
-                  {selected.keyNotes.map((n, i) => (
-                    <li key={i}>{n}</li>
-                  ))}
-                </ul>
-              </section>
-            )}
-
-            {selected.practice.length > 0 && (
-              <section>
-                <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Practice questions</h3>
-                <div className="space-y-2">
-                  {selected.practice.map((pq, i) => (
-                    <PracticeRow key={i} pq={pq} />
+                <SectionTitle>LeetCode</SectionTitle>
+                <div className="space-y-1.5">
+                  {problems.map((p) => (
+                    <div key={p.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 p-2 text-sm dark:border-slate-800">
+                      <span className="font-medium">{p.title}</span>
+                      <Chip tone={p.difficulty === 'easy' ? 'academics' : p.difficulty === 'medium' ? 'programming' : 'finance'}>{p.difficulty}</Chip>
+                      <a className="text-xs text-indigo-500 hover:underline" href={leetcodeUrl(p)} target="_blank" rel="noreferrer">LeetCode ↗</a>
+                      <a className="text-xs text-indigo-500 hover:underline" href={neetcodeUrl(p)} target="_blank" rel="noreferrer">NeetCode ↗</a>
+                    </div>
                   ))}
                 </div>
               </section>
             )}
-
-            {selected.videos.length > 0 && (
-              <section>
-                <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Videos</h3>
-                <ul className="space-y-1 text-sm">
-                  {selected.videos.map((v, i) => (
-                    <li key={i}>
-                      <a className="text-indigo-600 hover:underline dark:text-indigo-400" href={v.url} target="_blank" rel="noreferrer">
-                        ▶ {v.title}{v.minutes ? ` (${v.minutes}m)` : ''}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
+            {mod.exercises.length > 0 ? (
+              <section className="space-y-3">
+                <SectionTitle>Code exercises</SectionTitle>
+                {mod.exercises.map((e) => <CodeRunner key={e.id} exercise={e} />)}
               </section>
-            )}
-
-            {selected.sources.length > 0 && (
-              <section>
-                <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Sources</h3>
-                <ul className="space-y-1 text-sm text-slate-500 dark:text-slate-400">
-                  {selected.sources.map((s, i) => (
-                    <li key={i}>
-                      {s.url ? (
-                        <a className="hover:underline" href={s.url} target="_blank" rel="noreferrer">{s.label}</a>
-                      ) : (
-                        s.label
-                      )}
-                      {s.note ? ` — ${s.note}` : ''}
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-
-            <div className="flex items-center justify-between border-t border-slate-200 pt-3 dark:border-slate-800">
-              <div className="flex gap-2">
-                {!selected.id.startsWith('ls-') && (
-                  <>
-                    <button className="btn btn-ghost" onClick={() => openEdit(selected)}>Edit</button>
-                    <button className="btn btn-ghost" onClick={() => { removeLesson(selected.id); setSelectedId(null); }}>Delete</button>
-                  </>
-                )}
-              </div>
-              <button
-                className={progress[selected.id] ? 'btn btn-ghost' : 'btn btn-primary'}
-                onClick={() => toggleComplete(selected.id)}
-              >
-                {progress[selected.id] ? 'Mark incomplete' : 'Mark complete'}
-              </button>
-            </div>
+            ) : problems.length === 0 ? (
+              <EmptyState>No practice for this module yet.</EmptyState>
+            ) : null}
           </div>
         )}
-      </Modal>
 
-      {/* Lesson editor */}
-      <Modal open={editorOpen} onClose={() => setEditorOpen(false)} title={draft?.id && lessons.some((l) => l.id === draft.id) ? 'Edit lesson' : 'New lesson'} wide>
-        {draft && (
-          <LessonEditor
-            draft={draft}
-            setDraft={setDraft}
-            onCancel={() => { setEditorOpen(false); setDraft(null); }}
-            onSave={saveDraft}
-          />
+        {tab === 'links' && (
+          <div className="space-y-4 text-sm">
+            {mod.bookRefs.length > 0 && (
+              <section>
+                <SectionTitle>Read alongside</SectionTitle>
+                <ul className="space-y-1">
+                  {mod.bookRefs.map((r) => {
+                    const book = BOOK_BY_ID.get(r.bookId);
+                    if (!book) return null;
+                    const chapter = chaptersOf(r.bookId).find((c) => c.chapter === r.chapter);
+                    return (
+                      <li key={`${r.bookId}-${r.chapter}`} className="text-slate-600 dark:text-slate-300">
+                        <span className="font-medium">{book.title}</span>
+                        {chapter ? ` — Ch.${chapter.chapter}: ${chapter.title}` : ''}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            )}
+            {mod.videos.length > 0 && (
+              <section>
+                <SectionTitle>Videos</SectionTitle>
+                <ul className="space-y-1">
+                  {mod.videos.map((v, i) => (
+                    <li key={i}>
+                      <a className="text-indigo-500 hover:underline" href={v.url} target="_blank" rel="noreferrer">▶ {v.title}</a>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {mod.sources.length > 0 && (
+              <section>
+                <SectionTitle>Sources</SectionTitle>
+                <ul className="space-y-1 text-slate-500 dark:text-slate-400">
+                  {mod.sources.map((s, i) => (
+                    <li key={i}>{s.url ? <a className="hover:underline" href={s.url} target="_blank" rel="noreferrer">{s.label}</a> : s.label}{s.note ? ` — ${s.note}` : ''}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {mod.bookRefs.length === 0 && mod.videos.length === 0 && mod.sources.length === 0 && (
+              <EmptyState>No sources listed for this module yet.</EmptyState>
+            )}
+          </div>
         )}
-      </Modal>
-    </div>
-  );
-}
 
-function PracticeRow({ pq }: { pq: PracticeQuestion }) {
-  const [open, setOpen] = useState(false);
-  const [typed, setTyped] = useState('');
-  const hit = typed.trim().length > 0 && pq.a.toLowerCase().includes(typed.trim().toLowerCase().slice(0, 12));
-  return (
-    <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
-      <div className="text-sm font-medium text-slate-700 dark:text-slate-200">Q: {pq.q}</div>
-      <textarea
-        className="input mt-2 w-full"
-        rows={2}
-        placeholder="Type your answer, then reveal to compare…"
-        value={typed}
-        onChange={(e) => setTyped(e.target.value)}
-      />
-      {open ? (
-        <div className="mt-2 rounded bg-emerald-50 p-2 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">
-          <span className="font-semibold">A:</span> {pq.a}
+        <div className="flex items-center justify-between border-t border-slate-200 pt-3 dark:border-slate-800">
+          {mod.prereqs.length > 0 && (
+            <span className="text-xs text-slate-400">Builds on: {mod.prereqs.length} module(s)</span>
+          )}
+          <button className={done ? 'btn-ghost' : 'btn-primary'} onClick={onToggleDone}>
+            {done ? 'Mark incomplete' : 'Mark complete'}
+          </button>
         </div>
-      ) : (
-        <button className="btn btn-ghost mt-2" onClick={() => setOpen(true)}>Reveal answer</button>
-      )}
-      {typed.trim() && !open && (
-        <div className="mt-1 text-xs text-slate-400">{hit ? 'Looks on track — reveal to confirm.' : 'Reveal to compare with the model answer.'}</div>
-      )}
-    </div>
-  );
-}
-
-function LessonEditor({
-  draft, setDraft, onCancel, onSave,
-}: {
-  draft: Lesson;
-  setDraft: (l: Lesson) => void;
-  onCancel: () => void;
-  onSave: () => void;
-}) {
-  const set = (patch: Partial<Lesson>) => setDraft({ ...draft, ...patch });
-  const setList = <K extends keyof Lesson>(key: K, value: Lesson[K]) => setDraft({ ...draft, [key]: value });
-
-  return (
-    <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
-      <Field label="Track">
-        <select className="input" value={draft.trackId} onChange={(e) => set({ trackId: e.target.value as PillarId })}>
-          {PILLARS.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Title">
-        <input className="input" value={draft.title} onChange={(e) => set({ title: e.target.value })} placeholder="e.g. Put-Call Parity" />
-      </Field>
-      <Field label="One-line summary">
-        <input className="input" value={draft.summary} onChange={(e) => set({ summary: e.target.value })} />
-      </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Difficulty">
-          <select className="input" value={draft.difficulty} onChange={(e) => set({ difficulty: e.target.value as LessonDifficulty })}>
-            <option value="beginner">beginner</option>
-            <option value="intermediate">intermediate</option>
-            <option value="advanced">advanced</option>
-          </select>
-        </Field>
-        <Field label="Est. minutes">
-          <input className="input" type="number" value={draft.estMinutes} onChange={(e) => set({ estMinutes: Number(e.target.value) || 10 })} />
-        </Field>
       </div>
-      <Field label="Tags (comma-separated)">
-        <input className="input" value={draft.tags.join(', ')} onChange={(e) => set({ tags: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
-      </Field>
-      <Field label="Elaboration (use blank lines between paragraphs; lines starting with “- ” become bullets)">
-        <textarea className="input" rows={8} value={draft.elaboration} onChange={(e) => set({ elaboration: e.target.value })} />
-      </Field>
-      <Field label="Key notes (one per line)">
-        <textarea className="input" rows={4} value={draft.keyNotes.join('\n')} onChange={(e) => set({ keyNotes: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) })} />
-      </Field>
-
-      <Field label="Practice questions">
-        {draft.practice.map((pq, i) => (
-          <div key={i} className="mb-2 grid grid-cols-[1fr_1fr_auto] gap-2">
-            <input className="input" placeholder="Question" value={pq.q} onChange={(e) => setList('practice', draft.practice.map((x, j) => (j === i ? { ...x, q: e.target.value } : x)))} />
-            <input className="input" placeholder="Answer" value={pq.a} onChange={(e) => setList('practice', draft.practice.map((x, j) => (j === i ? { ...x, a: e.target.value } : x)))} />
-            <button className="btn btn-ghost" onClick={() => setList('practice', draft.practice.filter((_, j) => j !== i))}>✕</button>
-          </div>
-        ))}
-        <button className="btn btn-ghost" onClick={() => setList('practice', [...draft.practice, { q: '', a: '' }])}>+ Add question</button>
-      </Field>
-
-      <Field label="Videos (YouTube links)">
-        {draft.videos.map((v, i) => (
-          <div key={i} className="mb-2 grid grid-cols-[1fr_2fr_auto] gap-2">
-            <input className="input" placeholder="Title" value={v.title} onChange={(e) => setList('videos', draft.videos.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} />
-            <input className="input" placeholder="URL" value={v.url} onChange={(e) => setList('videos', draft.videos.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)))} />
-            <button className="btn btn-ghost" onClick={() => setList('videos', draft.videos.filter((_, j) => j !== i))}>✕</button>
-          </div>
-        ))}
-        <button className="btn btn-ghost" onClick={() => setList('videos', [...draft.videos, { title: '', url: '' } as VideoLink])}>+ Add video</button>
-      </Field>
-
-      <Field label="Sources">
-        {draft.sources.map((s, i) => (
-          <div key={i} className="mb-2 grid grid-cols-[2fr_2fr_auto] gap-2">
-            <input className="input" placeholder="Label" value={s.label} onChange={(e) => setList('sources', draft.sources.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))} />
-            <input className="input" placeholder="URL (optional)" value={s.url ?? ''} onChange={(e) => setList('sources', draft.sources.map((x, j) => (j === i ? { ...x, url: e.target.value } : x)))} />
-            <button className="btn btn-ghost" onClick={() => setList('sources', draft.sources.filter((_, j) => j !== i))}>✕</button>
-          </div>
-        ))}
-        <button className="btn btn-ghost" onClick={() => setList('sources', [...draft.sources, { label: '' } as LessonSource])}>+ Add source</button>
-      </Field>
-
-      <div className="flex justify-end gap-2 border-t border-slate-200 pt-3 dark:border-slate-800">
-        <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-        <button className="btn btn-primary" onClick={onSave} disabled={!draft.title.trim()}>Save lesson</button>
-      </div>
-    </div>
+    </Modal>
   );
 }
