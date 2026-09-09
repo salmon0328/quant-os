@@ -16,20 +16,21 @@ interface NavGroup {
 
 const NAV: NavGroup[] = [
   {
-    group: 'Daily',
+    group: 'Plan',
     items: [
       { to: '/', label: 'Home', icon: '◎', end: true },
       { to: '/today', label: 'Today', icon: '☑' },
-      { to: '/inbox', label: 'Inbox', icon: '📥' },
+      { to: '/roadmap', label: 'Roadmap', icon: '🗺' },
+      { to: '/projects', label: 'Projects', icon: '🛠' },
     ],
   },
   {
     group: 'Learn',
     items: [
-      { to: '/learn', label: 'Learn', icon: '📚' },
-      { to: '/knowledge', label: 'Knowledge', icon: '🧠' },
-      { to: '/aptitude', label: 'Aptitude', icon: '⚡' },
-      { to: '/projects', label: 'Projects', icon: '🛠' },
+      { to: '/learn', label: 'Learn', icon: '📖' },
+      { to: '/drill', label: 'Interview Drill', icon: '🧠' },
+      { to: '/aptitude', label: 'Aptitude Lab', icon: '⚡' },
+      { to: '/books', label: 'Books', icon: '📚' },
     ],
   },
   {
@@ -37,21 +38,14 @@ const NAV: NavGroup[] = [
     items: [
       { to: '/markets', label: 'Markets', icon: '📈' },
       { to: '/insights', label: 'Insights', icon: '💡' },
+      { to: '/research', label: 'Deep dives', icon: '🔬' },
     ],
   },
   {
-    group: 'Track',
+    group: 'Career',
     items: [
       { to: '/career', label: 'Career', icon: '💼' },
       { to: '/reviews', label: 'Reviews', icon: '🔁' },
-      { to: '/roadmap', label: 'Roadmap', icon: '🗺' },
-    ],
-  },
-  {
-    group: 'System',
-    items: [
-      { to: '/resources', label: 'Resources', icon: '🔗' },
-      { to: '/research', label: 'Deep dives', icon: '🔬' },
       { to: '/settings', label: 'Settings', icon: '⚙' },
     ],
   },
@@ -69,7 +63,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { state, patch, syncEnabled, syncStatus } = useApp();
   const { session } = useAuth();
   const dark = state.theme === 'dark';
-  const inboxCount = (state.feed ?? []).filter((f) => f.status === 'inbox').length;
 
   return (
     <div className="flex min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
@@ -104,9 +97,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
                   >
                     <span className="w-4 text-center text-xs">{n.icon}</span>
                     <span className="flex-1">{n.label}</span>
-                    {n.to === '/inbox' && inboxCount > 0 && (
-                      <span className="rounded-full bg-slate-200 px-1.5 text-[10px] font-bold text-slate-600 dark:bg-slate-700 dark:text-slate-200">{inboxCount}</span>
-                    )}
                   </NavLink>
                 ))}
               </div>

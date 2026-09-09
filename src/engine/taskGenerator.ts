@@ -1,4 +1,4 @@
-import type { AppState, EnergyMode, FeedItem, Task, TaskCategory, PillarId } from '../models';
+import type { AppState, EnergyMode, FeedSource, Task, TaskCategory, PillarId, TrackId } from '../models';
 import { DEFAULT_SCHEDULE } from '../models';
 import { weekForIndex } from '../data/curriculum';
 import { weekIndexFrom, dayOfWeek, daysBetween } from '../lib/date';
@@ -6,6 +6,11 @@ import { dueForReview, srsActionFor } from './spacedRepetition';
 import { recentCompletionRate } from './profile';
 import { assignTimes, freeSlots, isCampusDay } from './scheduler';
 import { TASK_KIND_BY_ID, minutesFor, type TaskKind, type TaskKindId } from '../data/cadence';
+import { cursorFor, nextItem, nextItems } from './tracks';
+import { LEETCODE, leetcodeUrl, neetcodeUrl } from '../data/tracks/leetcode';
+import { TERMINAL } from '../data/tracks/bloomberg';
+import { READING } from '../data/tracks/reading';
+import { FEED_SOURCES } from '../data/feedSources';
 
 export const ENERGY_BUDGET: Record<EnergyMode, number> = {
   low: 45, // minimum viable day
@@ -45,41 +50,24 @@ interface Spec {
   prefer?: 'morning' | 'midday' | 'evening';
   micro?: boolean;
   rank: number;
-}
-
-const LEETCODE_PATTERNS = [
-  'arrays', 'hash maps', 'strings', 'two pointers', 'sliding window',
-  'binary search', 'stacks', 'queues', 'heaps', 'trees', 'graphs', 'dynamic programming',
-];
-
-/**
- * Patterns advance by week rather than being drawn at random, so the same
- * pattern never reappears two sessions in a row and progress is visible.
- */
-function leetcodePattern(weekIdx: number): string {
-  return LEETCODE_PATTERNS[Math.max(0, weekIdx - 1) % LEETCODE_PATTERNS.length];
+  trackId?: TrackId;
+  trackItemId?: string;
+  steps?: string[];
+  links?: { label: string; url: string }[];
 }
 
 // -------------------------------------------------------------------- inputs
 
-function labelForType(t: FeedItem['type']): string {
+function labelForType(t: FeedSource['type']): string {
   switch (t) {
     case 'podcast': return 'Podcast';
     case 'substack': return 'Read';
-    case 'earnings': return 'Quartr';
+    case 'earnings': return 'Earnings call';
     case 'paper': return 'Paper';
     case 'video': return 'Video';
     case 'terminal': return 'Terminal';
     default: return 'News';
   }
-}
-
-/** The oldest queued item wins, so the queue drains in the order it filled. */
-function nextQueued(feed: FeedItem[], onCampus: boolean): FeedItem | undefined {
-  return feed
-    .filter((f) => f.status === 'inbox' && (!f.needsCampus || onCampus))
-    .slice()
-    .sort((a, b) => a.addedAt.localeCompare(b.addedAt))[0];
 }
 
 // ------------------------------------------------------------------- builders
@@ -138,54 +126,130 @@ function buildSpec(state: AppState, minutes: number): Spec {
   };
 }
 
-function codingSpec(weekIdx: number, minutes: number): Spec {
-  const pat = leetcodePattern(weekIdx);
+/**
+ * Names the actual next two problems rather than a pattern. Premium problems
+ * are skipped by default — a task you cannot open is worse than no task.
+ */
+function codingSpec(state: AppState, minutes: number): Spec {
+  const cursor = cursorFor(state, 'leetcode');
+  const picks = nextItems(LEETCODE, cursor, 2, (p) => !p.premium);
+
+  if (picks.length === 0) {
+    return {
+      kind: 'coding', pillar: 'programming', category: 'technical',
+      title: 'LeetCode — roadmap complete, pick a weak pattern to revisit',
+      why: 'You have worked through the NeetCode 150. Revision beats new volume now.',
+      minutes,
+      output: 'Re-solve two problems you originally failed, from memory.',
+      priority: 'core', prefer: 'midday',
+      rank: TASK_KIND_BY_ID.get('coding')!.rank,
+    };
+  }
+
+  const pattern = picks[0].pattern;
+  const titles = picks.map((p) => p.title).join(' + ');
+  const done = cursor.completedIds.length;
+
   return {
     kind: 'coding',
     pillar: 'programming',
     category: 'technical',
-    title: `LeetCode — ${pat} (2 problems)`,
-    why: 'Optimise for understanding, not count.',
+    title: `LeetCode — ${titles}`,
+    why: `${pattern} · ${picks.map((p) => p.difficulty).join('/')} · ${done}/${LEETCODE.length} of the NeetCode 150 done.`,
     minutes,
-    resourceId: 'neetcode',
-    output: `Solve 2 ${pat} problems; write a 3-line explanation of the pattern.`,
+    output: `Solve both, then write three lines on what makes this a ${pattern} problem.`,
     priority: 'core',
     prefer: 'midday',
     rank: TASK_KIND_BY_ID.get('coding')!.rank,
+    trackId: 'leetcode',
+    // Only the first is the cursor anchor; the second is credited alongside it
+    // when the task is ticked (see completeTaskTrack).
+    trackItemId: picks.map((p) => p.id).join(','),
+    links: picks.flatMap((p) => [
+      { label: `${p.title} (LeetCode)`, url: leetcodeUrl(p) },
+      { label: `${p.title} (NeetCode walkthrough)`, url: neetcodeUrl(p) },
+    ]),
+  };
+}
+
+/** One book chapter, in order, with its concepts named. */
+function theorySpec(state: AppState, minutes: number): Spec {
+  const cursor = cursorFor(state, 'reading');
+  const unit = nextItem(READING, cursor);
+  const rank = TASK_KIND_BY_ID.get('theory')!.rank;
+
+  if (!unit) {
+    return {
+      kind: 'theory', pillar: 'finance', category: 'finance',
+      title: 'Reading — pick your next book in Books',
+      why: 'Every chapter in the tracked books is done.',
+      minutes,
+      output: 'Choose the next book and add it to the shelf.',
+      priority: 'core', prefer: 'evening', rank,
+    };
+  }
+
+  const shortBook = unit.bookLabel.split('—')[0].trim();
+  return {
+    kind: 'theory',
+    pillar: 'finance',
+    category: 'finance',
+    title: `Read — ${shortBook} Ch.${unit.chapter}: ${unit.title}`,
+    why: `Covers ${unit.concepts.slice(0, 3).join(', ')}. ${cursor.completedIds.length}/${READING.length} chapters done.`,
+    minutes: Math.max(minutes, Math.min(unit.estMinutes, 60)),
+    resourceHint: `${unit.bookLabel}, chapter ${unit.chapter}`,
+    output: 'Three lines: the central idea, the formula or mechanism, and one thing you did not follow.',
+    priority: 'core',
+    prefer: 'evening',
+    rank,
+    trackId: 'reading',
+    trackItemId: unit.id,
+    steps: unit.concepts.map((c) => `Be able to explain: ${c}`),
   };
 }
 
 /** Deep input prefers a real queued item; otherwise it names a rotation. */
-function deepInputSpec(feed: FeedItem[], onCampus: boolean, minutes: number): Spec {
-  const queued = nextQueued(feed, onCampus);
-  if (queued) {
+/**
+ * One named source per session, rotated deterministically.
+ *
+ * This used to drain a queue the user filled by hand, which is why it was
+ * usually empty. Rotating the curated source list means the task always names
+ * something specific with a real link, and no data entry is required.
+ */
+function deepInputSpec(dateISO: string, weekIdx: number, onCampus: boolean, minutes: number): Spec {
+  const pool = FEED_SOURCES.filter((f) => !f.needsCampus || onCampus);
+  const rank = TASK_KIND_BY_ID.get('deepInput')!.rank;
+
+  // Index on the day-of-year plus the week, so the same source does not recur
+  // on the same weekday every week.
+  const seed = Number(dateISO.slice(8, 10)) + weekIdx * 3;
+  const source = pool[seed % Math.max(1, pool.length)];
+
+  if (!source) {
     return {
-      kind: 'deepInput',
-      pillar: queued.pillar,
-      category: 'markets',
-      title: `${labelForType(queued.type)} — ${queued.title}`,
-      why: 'You saved this for a reason. Clearing one item a day keeps the inbox honest.',
-      minutes: Math.max(minutes, queued.estMinutes),
-      url: queued.url,
-      output: 'Write 2-3 lines: what was the claim, what was the evidence, what do you disagree with?',
-      priority: 'optional',
-      location: queued.needsCampus ? 'campus' : 'anywhere',
-      prefer: queued.type === 'podcast' ? 'midday' : 'morning',
-      rank: TASK_KIND_BY_ID.get('deepInput')!.rank,
+      kind: 'deepInput', pillar: 'finance', category: 'markets',
+      title: 'Deep input — pick a long-form read',
+      why: 'One substantial input a session, rather than a stream of headlines.',
+      minutes,
+      output: 'Two or three lines: the claim, the evidence, and what you disagree with.',
+      priority: 'optional', prefer: 'midday', rank,
     };
   }
+
   return {
     kind: 'deepInput',
-    pillar: 'finance',
+    pillar: source.pillar,
     category: 'markets',
-    title: 'Quartr — earnings call deep dive',
-    why: 'Primary-source company research. Earnings language is what interviewers expect.',
-    minutes,
-    resourceId: 'quartr',
-    output: 'One company: guidance vs results, what management avoided, one follow-up question.',
+    title: `${labelForType(source.type)} — ${source.name}`,
+    why: source.note ?? 'A substantial input beats another scroll through headlines.',
+    minutes: Math.max(minutes, Math.min(source.defaultMinutes, 60)),
+    url: source.url,
+    output: 'Two or three lines: the claim, the evidence, and what you disagree with. File it in Insights.',
     priority: 'optional',
-    prefer: 'morning',
-    rank: TASK_KIND_BY_ID.get('deepInput')!.rank,
+    location: source.needsCampus ? 'campus' : 'anywhere',
+    prefer: source.type === 'podcast' ? 'midday' : 'morning',
+    rank,
+    links: [{ label: source.name, url: source.url }],
   };
 }
 
@@ -211,20 +275,42 @@ function drillSpec(state: AppState, dateISO: string, minutes: number): Spec {
   };
 }
 
-function terminalSpec(minutes: number): Spec {
+/** Names the specific function and the three things to run on it. */
+function terminalSpec(state: AppState, minutes: number): Spec {
+  const cursor = cursorFor(state, 'bloomberg');
+  const fn = nextItem(TERMINAL, cursor);
+  const rank = TASK_KIND_BY_ID.get('terminal')!.rank;
+
+  if (!fn) {
+    return {
+      kind: 'terminal', pillar: 'finance', category: 'finance',
+      title: 'Bloomberg — build something of your own in BQNT',
+      why: 'You have been through the function curriculum; the leverage now is using it in a project.',
+      minutes,
+      output: 'One BQuant notebook that pulls data you could not get elsewhere.',
+      priority: 'optional', location: 'campus', prefer: 'midday', rank,
+    };
+  }
+
+  const prereqs = (fn.buildsOn ?? [])
+    .map((id) => TERMINAL.find((f) => f.id === id)?.mnemonic)
+    .filter(Boolean);
+
   return {
     kind: 'terminal',
     pillar: 'finance',
     category: 'finance',
-    title: 'Bloomberg Terminal — one function, learned properly',
-    why: 'Terminal fluency is a cheap differentiator — most students never touch it.',
-    minutes,
-    resourceId: 'bloomberg-bquant',
-    output: 'Write down the mnemonic + one thing you pulled that you could not get elsewhere.',
+    title: `Bloomberg — ${fn.mnemonic}: ${fn.name}`,
+    why: `${fn.whatItShows}${prereqs.length ? ` Builds on ${prereqs.join(', ')}.` : ''} ${cursor.completedIds.length}/${TERMINAL.length} functions learned.`,
+    minutes: Math.max(minutes, Math.min(fn.estMinutes, 45)),
+    output: `Work through all three steps and note what ${fn.mnemonic} gave you that you could not get elsewhere.`,
     priority: 'optional',
     location: 'campus',
     prefer: 'midday',
-    rank: TASK_KIND_BY_ID.get('terminal')!.rank,
+    rank,
+    trackId: 'bloomberg',
+    trackItemId: fn.id,
+    steps: fn.tryThis,
   };
 }
 
@@ -278,6 +364,10 @@ function specToTask(dateISO: string, s: Spec): Task {
     generated: true,
     location: s.location ?? 'anywhere',
     prefer: s.prefer,
+    trackId: s.trackId,
+    trackItemId: s.trackItemId,
+    steps: s.steps,
+    links: s.links,
     // Stable id: a cadence task keeps the same id across regenerations, so
     // completing it once isn't undone by re-running the generator.
   };
@@ -300,7 +390,6 @@ export function generateTasks(
   const dow = dayOfWeek(dateISO);
   const onCampus = isCampusDay(settings, dateISO);
   const cw = weekForIndex(weekIdx);
-  const feed = state.feed ?? [];
 
   const caps = ENERGY_CAPS[energy] ?? ENERGY_CAPS.normal;
   const defaultCore = settings.maxCoreTasks || caps.core;
@@ -348,45 +437,19 @@ export function generateTasks(
   if (onDay(build)) candidates.push(buildSpec(state, mins(build)));
 
   const coding = TASK_KIND_BY_ID.get('coding')!;
-  if (onDay(coding)) candidates.push(codingSpec(weekIdx, mins(coding)));
+  if (onDay(coding)) candidates.push(codingSpec(state, mins(coding)));
+
+  const theory = TASK_KIND_BY_ID.get('theory')!;
+  if (onDay(theory)) candidates.push(theorySpec(state, mins(theory)));
 
   const deepInput = TASK_KIND_BY_ID.get('deepInput')!;
-  if (onDay(deepInput)) candidates.push(deepInputSpec(feed, onCampus, mins(deepInput)));
+  if (onDay(deepInput)) candidates.push(deepInputSpec(dateISO, weekIdx, onCampus, mins(deepInput)));
 
   const drill = TASK_KIND_BY_ID.get('drill')!;
   if (onDay(drill)) candidates.push(drillSpec(state, dateISO, mins(drill)));
 
   const terminal = TASK_KIND_BY_ID.get('terminal')!;
-  if (onDay(terminal) && onCampus) candidates.push(terminalSpec(mins(terminal)));
-
-  // ----------------------------------------------- fill an empty core slot
-  // Weekdays with no rotation task would otherwise be nearly empty. Rather than
-  // inventing random work, drain the inbox the user already filled.
-  const coreCount = candidates.filter((c) => c.priority === 'core').length;
-  if (coreCount < maxCore && dow !== 0 && upcoming.length === 0) {
-    const queued = nextQueued(feed, onCampus);
-    // Guard on url only when there is one: comparing undefined === undefined
-    // would treat an un-linked item as already scheduled and skip it.
-    const alreadyQueued = queued?.url
-      ? candidates.some((c) => c.url === queued.url)
-      : false;
-    if (queued && !alreadyQueued) {
-      candidates.push({
-        kind: 'deepInput',
-        pillar: queued.pillar,
-        category: 'markets',
-        title: `Clear inbox — ${queued.title}`,
-        why: 'Your queue drains in the order you filled it, on days the rhythm leaves room.',
-        minutes: Math.min(queued.estMinutes, 45),
-        url: queued.url,
-        output: 'Two lines: what it argued, and whether you buy it.',
-        priority: 'core',
-        location: queued.needsCampus ? 'campus' : 'anywhere',
-        prefer: 'midday',
-        rank: deepInput.rank,
-      });
-    }
-  }
+  if (onDay(terminal) && onCampus) candidates.push(terminalSpec(state, mins(terminal)));
 
   // ------------------------------------------------------------- weakest pillar
   const weakest = [...state.pillars].sort((a, b) => a.score - b.score)[0];

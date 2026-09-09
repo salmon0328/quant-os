@@ -1,0 +1,183 @@
+{
+  "kept": [
+    "prob-basics-q4",
+    "prob-conditional-q3",
+    "prob-rv-q3",
+    "prob-rv-q4",
+    "prob-expectation-q3",
+    "prob-expectation-q4",
+    "prob-clt-q2",
+    "prob-clt-q5",
+    "prob-walks-q3",
+    "prob-markov-q3",
+    "prob-martingales-q3",
+    "stat-estimation-q3",
+    "stat-mle-q2",
+    "stat-mle-q5",
+    "stat-testing-q3",
+    "stat-testing-q4",
+    "stat-ols-q4",
+    "stat-diagnostics-q3",
+    "stat-timeseries-q3",
+    "mkt-instruments-q3",
+    "mkt-returns-q3",
+    "mkt-returns-q4",
+    "mkt-forwards-q4",
+    "mkt-drivers-q3",
+    "der-binomial-q3",
+    "der-bs-q3",
+    "der-hedging-q3",
+    "fi-rates-q3",
+    "fi-duration-q5",
+    "fi-swaps-q2",
+    "fi-swaps-q5",
+    "qm-linalg-q3",
+    "qm-brownian-q3",
+    "qm-ito-q4",
+    "qm-montecarlo-q3",
+    "ml-supervised-q3",
+    "ml-supervised-q4",
+    "ml-validation-q3",
+    "ml-trees-q3",
+    "ml-nn-q3",
+    "alg-complexity-q3",
+    "alg-arrays-q3",
+    "alg-window-q3",
+    "alg-binsearch-q4",
+    "alg-trees-q3",
+    "alg-graphs-q3",
+    "alg-heaps-q3",
+    "alg-dp-q3",
+    "alg-dp-q4",
+    "prog-python-q3",
+    "prog-pandas-q3",
+    "prog-numerics-q3",
+    "ms-orderbook-q4",
+    "ms-making-q3",
+    "der-options-q3",
+    "der-greeks-q3",
+    "der-greeks-q4"
+  ],
+  "fixed": [
+    {
+      "module": "prob-basics",
+      "id": "prob-basics-q3",
+      "was": 0.019230769230769232,
+      "now": 0.07692307692307693
+    },
+    {
+      "module": "prob-conditional",
+      "id": "prob-conditional-q4",
+      "was": 0.185,
+      "now": 0.17
+    },
+    {
+      "module": "prob-walks",
+      "id": "prob-walks-q4",
+      "was": 0.2368,
+      "now": 0.18338500000000002
+    },
+    {
+      "module": "der-parity",
+      "id": "der-parity-q2",
+      "was": 8.71,
+      "now": 10.35
+    },
+    {
+      "module": "der-parity",
+      "id": "der-parity-q5",
+      "was": 4.68,
+      "now": 3.37
+    },
+    {
+      "module": "der-binomial",
+      "id": "der-binomial-q4",
+      "was": 5.0,
+      "now": 5.25
+    },
+    {
+      "module": "der-bs",
+      "id": "der-bs-q4",
+      "was": 0.04,
+      "now": -0.063
+    },
+    {
+      "module": "der-hedging",
+      "id": "der-hedging-q4",
+      "was": -3.75,
+      "now": 0.81
+    },
+    {
+      "module": "der-smile",
+      "id": "der-smile-q2",
+      "was": 100.0,
+      "now": 104.0
+    },
+    {
+      "module": "der-varswap",
+      "id": "der-varswap-q3",
+      "was": 0.000156,
+      "now": 0.000789100675
+    },
+    {
+      "module": "fi-curve",
+      "id": "fi-curve-q4",
+      "was": 0.05,
+      "now": 0.05268
+    },
+    {
+      "module": "fi-duration",
+      "id": "fi-duration-q2",
+      "was": -0.015,
+      "now": -1.5
+    },
+    {
+      "module": "fi-policy",
+      "id": "fi-policy-q3",
+      "was": 25.0,
+      "now": 0.0
+    },
+    {
+      "module": "qm-optimisation",
+      "id": "qm-optimisation-q3",
+      "was": 0.0084,
+      "now": 0.0155
+    },
+    {
+      "module": "ml-finance",
+      "id": "ml-finance-q2",
+      "was": 0.455,
+      "now": 0.5
+    },
+    {
+      "module": "prog-pandas",
+      "id": "prog-pandas-q4",
+      "was": 30.0,
+      "now": 29.0
+    },
+    {
+      "module": "ms-impact",
+      "id": "ms-impact-q3",
+      "was": 0.24,
+      "now": 2.4
+    },
+    {
+      "module": "der-options",
+      "id": "der-options-q4",
+      "was": 78.0,
+      "now": 38.0
+    }
+  ],
+  "dropped": [
+    {
+      "module": "prob-markov",
+      "id": "prob-markov-q4",
+      "stored": 3.0,
+      "solves": [
+        null,
+        null
+      ],
+      "reason": "independent solves disagree"
+    }
+  ]
+}

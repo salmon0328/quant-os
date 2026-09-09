@@ -1,6 +1,6 @@
-import type { CardProgress, Flashcard, FlashcardSeed } from '../models';
-import { addDays, today } from '../lib/date';
-import { SRS_INTERVALS } from '../engine/spacedRepetition';
+import type { CardProgress, CardRole, Flashcard, FlashcardSeed, RecallGrade } from '../models';
+import { today } from '../lib/date';
+import { gradeProgress } from '../engine/spacedRepetition';
 
 let cached: FlashcardSeed[] | null = null;
 
@@ -8,12 +8,41 @@ let cached: FlashcardSeed[] | null = null;
  * The deck is ~200KB, so it is imported on demand rather than shipped in the
  * main bundle. Card text never enters app state — only progress does.
  */
-export async function loadDeck(): Promise<Flashcard[]> {
+export async function loadSeeds(): Promise<FlashcardSeed[]> {
   if (!cached) {
-    const mod = await import('./flashcards.generated');
-    cached = mod.FLASHCARD_SEEDS;
+    // Both decks are lazily imported together: the extracted book cards and the
+    // purpose-built quant bank that rebalances them.
+    const [book, quant] = await Promise.all([
+      import('./flashcards.generated'),
+      import('./quantbank.generated'),
+    ]);
+    cached = dedupe([...book.FLASHCARD_SEEDS, ...quant.QUANT_BANK_SEEDS]);
   }
-  return mergeDeck(cached, {});
+  return cached;
+}
+
+/**
+ * Drops cards that hash to an id already present.
+ *
+ * The source books overlap — "Walk me through the three financial statements"
+ * appears in both WSP and BIWS — and cardId() hashes the question text, so
+ * those two collide and would share one SRS progress entry. Deduping here
+ * rather than changing the hash keeps every legacyIds mapping intact.
+ *
+ * The fuller answer wins, since the duplicate pair is the same question.
+ */
+function dedupe(seeds: FlashcardSeed[]): FlashcardSeed[] {
+  const byId = new Map<string, FlashcardSeed>();
+  for (const seed of seeds) {
+    const id = cardId(seed);
+    const existing = byId.get(id);
+    if (!existing || seed.answer.length > existing.answer.length) byId.set(id, seed);
+  }
+  return [...byId.values()];
+}
+
+export async function loadDeck(): Promise<Flashcard[]> {
+  return mergeDeck(await loadSeeds(), {});
 }
 
 /** Stable id derived from the question text, so regenerating the deck is safe. */
@@ -45,20 +74,33 @@ export function mergeDeck(seeds: FlashcardSeed[], progress: Record<string, CardP
       timesCorrect: p?.timesCorrect ?? 0,
       page: s.page,
       confidence: s.confidence,
+      role: s.role,
+      difficulty: s.difficulty,
     };
   });
 }
 
-export function gradeCard(prev: CardProgress | undefined, remembered: boolean): CardProgress {
-  const stage0 = prev?.srsStage ?? 0;
-  const stage = remembered ? Math.min(stage0 + 1, SRS_INTERVALS.length - 1) : Math.max(stage0 - 1, 0);
-  return {
-    srsStage: stage,
-    lastReviewed: today(),
-    nextReview: addDays(today(), SRS_INTERVALS[stage]),
-    timesSeen: (prev?.timesSeen ?? 0) + 1,
-    timesCorrect: (prev?.timesCorrect ?? 0) + (remembered ? 1 : 0),
-  };
+/**
+ * Maps old card ids to current ones after the deck has been re-cleaned.
+ * Consumed by hydrate() so a repaired question does not orphan its progress.
+ */
+export function legacyIdMap(seeds: FlashcardSeed[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const seed of seeds) {
+    const current = cardId(seed);
+    for (const old of seed.legacyIds ?? []) {
+      if (old !== current) map[old] = current;
+    }
+  }
+  return map;
+}
+
+/**
+ * One review. Delegates to the SM-2 scheduler so the deck and any other caller
+ * share a single definition of what a grade does.
+ */
+export function gradeCard(prev: CardProgress | undefined, grade: RecallGrade): CardProgress {
+  return gradeProgress(prev, grade);
 }
 
 export type DeckFilter = 'all' | 'due' | 'new' | 'high';
@@ -111,9 +153,13 @@ export function buildQueue(
   limit: number,
   date = today(),
   order: 'sequential' | 'shuffle' = 'sequential',
-  topic?: string
+  topic?: string,
+  role?: CardRole
 ): Flashcard[] {
-  const scoped = topic ? cards.filter((c) => c.section === topic) : cards;
+  // Role first: drilling 595 banking cards when you are targeting quant is the
+  // single biggest thing wrong with the deck as extracted.
+  const byRole = role ? cards.filter((c) => c.role === role) : cards;
+  const scoped = topic ? byRole.filter((c) => c.section === topic) : byRole;
   let pool = scoped.filter((c) => matchesFilter(c, filter, date));
 
   if (pool.length === 0) {

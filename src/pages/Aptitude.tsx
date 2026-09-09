@@ -8,6 +8,7 @@ import { FIRM_OA } from '../data/aptitudeFirms';
 import { Blitz, Patterns, Reaction, Wordle } from '../components/aptitude/Speed';
 import { TaskSwitch, Pincode, GridRecall, Flanker, HoldFire } from '../components/aptitude/Cognitive';
 import { Fractions, Probability, Fermi, Brainteasers } from '../components/aptitude/Drills';
+import { MarketMaking } from '../components/oa/MarketMaking';
 
 interface Drill {
   kind: AptitudeKind;
@@ -43,6 +44,13 @@ const GROUPS: Group[] = [
       { kind: 'probability', label: 'Probability', blurb: 'Timed expected-value and probability problems.' },
       { kind: 'fermi', label: 'Fermi questions', blurb: 'Order-of-magnitude estimation with worked breakdowns.' },
       { kind: 'brainteaser', label: 'Brainteasers', blurb: 'Classic quant puzzles, including the traps (regions vs intersections).' },
+    ],
+  },
+  {
+    group: 'Trading',
+    note: 'Quoting a market — the game prop desks run in interviews, not a timed test.',
+    drills: [
+      { kind: 'making', label: 'Market making', blurb: 'Quote a two-sided market. The counterparty only trades when you are wrong.' },
     ],
   },
   {
@@ -105,6 +113,12 @@ export default function Aptitude() {
       case 'gridrecall': return <GridRecall best={bestFor('gridrecall')} onDone={done} />;
       case 'flanker': return <Flanker best={bestFor('flanker')} onDone={done} />;
       case 'holdfire': return <HoldFire best={bestFor('holdfire')} onDone={done} />;
+      case 'making': return (
+        <MarketMaking
+          best={bestFor('making')?.score ?? null}
+          onDone={(pnl, rounds, ms) => record('making', pnl, rounds, ms)}
+        />
+      );
       case 'reaction': return <Reaction best={bestFor('reaction')} onDone={done} />;
       case 'wordle': return <Wordle best={bestFor('wordle')} onDone={done} />;
       default: return null;
@@ -222,6 +236,10 @@ function formatRun(s: AptitudeScore): string {
       return s.score === 1 ? `solved in ${s.total}` : 'missed';
     case 'pincode':
       return `span ${s.score}`;
+    case 'making':
+      // Score carries P&L here, which can be negative — a bare number would read
+      // as a count.
+      return `P&L ${s.score >= 0 ? '+' : ''}${s.score.toFixed(1)} over ${s.total} rounds`;
     case 'holdfire':
       return `${s.score} pts`;
     case 'fermi':

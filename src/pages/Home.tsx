@@ -40,7 +40,7 @@ export default function Home() {
   }, [blocks, todays]);
 
   const nextUp = timeline.find((x) => toMinutes(x.end) > nowMinutes);
-  const inboxCount = (state.feed ?? []).filter((f) => f.status === 'inbox').length;
+  const readingCount = Object.values(state.bookProgress ?? {}).filter((b) => b.status === 'reading').length;
   const dueCards = Object.values(state.cardProgress ?? {}).filter((p) => p.nextReview <= d).length;
   const activeProject = state.projects.find((p) => p.status === 'active') ?? state.projects.find((p) => p.status === 'backlog');
   const nextDeadline = [...state.deadlines].filter((x) => daysBetween(d, x.date) >= 0).sort((a, b) => a.date.localeCompare(b.date))[0];
@@ -122,12 +122,12 @@ export default function Home() {
 
         <div className="space-y-5">
           <div className="grid grid-cols-2 gap-3">
-            <Link to="/inbox" className="card transition-all hover:shadow-md">
-              <div className="label">Inbox</div>
-              <div className="mt-1 text-2xl font-bold">{inboxCount}</div>
-              <div className="text-[10px] text-slate-400">queued to read</div>
+            <Link to="/books" className="card transition-all hover:shadow-md">
+              <div className="label">Reading</div>
+              <div className="mt-1 text-2xl font-bold">{readingCount}</div>
+              <div className="text-[10px] text-slate-400">books on the go</div>
             </Link>
-            <Link to="/knowledge" className="card transition-all hover:shadow-md">
+            <Link to="/drill" className="card transition-all hover:shadow-md">
               <div className="label">Drill</div>
               <div className="mt-1 text-2xl font-bold text-pink-500">{dueCards}</div>
               <div className="text-[10px] text-slate-400">cards due</div>

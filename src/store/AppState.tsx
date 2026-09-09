@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import type {
-  AppState, CardProgress, EnergyMode, FeedItem, FixedBlock, Insight,
-  ScheduleSettings, Task, KnowledgeEntry, DayLog, Lesson,
+  AppState, CardProgress, EnergyMode, FixedBlock, Insight,
+  ScheduleSettings, Task, TaskStatus, TrackId, KnowledgeEntry, DayLog, Lesson, RecallGrade,
+  FlashcardSeed, BookProgress, BookStatus, QuizResult, Prediction,
 } from '../models';
 import { DEFAULT_SCHEDULE } from '../models';
 import { PILLARS } from '../data/pillars';
@@ -10,9 +11,13 @@ import { PROJECTS } from '../data/projects';
 import { KNOWLEDGE } from '../data/knowledge';
 import { LESSONS } from '../data/lessons';
 import { today, mondayOf, addDays } from '../lib/date';
+import { uid } from '../lib/id';
+import { DEFAULT_WATCHLIST } from '../data/watchlist';
 import { generateTasks, scheduleExisting } from '../engine/taskGenerator';
+import { completeItems, skipItems, uncompleteItems } from '../engine/tracks';
+import { chaptersOf, EMPTY_BOOK_PROGRESS } from '../data/books';
 import { scheduleNextReview, initReview } from '../engine/spacedRepetition';
-import { gradeCard } from '../data/flashcards';
+import { gradeCard, legacyIdMap } from '../data/flashcards';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 import { useAuth } from './AuthState';
 // Type-only: erased at build time, so the server's fetch logic stays out of the
@@ -55,12 +60,17 @@ function buildInitialState(): AppState {
     // --- v2 ---
     schedule: { ...DEFAULT_SCHEDULE },
     fixedBlocks: [],
-    feed: [],
     cardProgress: {},
     deckSize: 0,
     drillLogs: [],
     insights: [],
-    seedVersion: 2,
+    seedVersion: 3,
+    // --- v3 ---
+    trackProgress: {},
+    bookProgress: {},
+    quizResults: [],
+    predictions: [],
+    watchlist: DEFAULT_WATCHLIST,
   };
 }
 
@@ -111,13 +121,49 @@ function hydrate(parsed: Partial<AppState>): AppState {
     // v2 fields tolerate older payloads.
     schedule: migrateSchedule({ ...base.schedule, ...(parsed.schedule ?? {}) }),
     fixedBlocks: parsed.fixedBlocks ?? base.fixedBlocks,
-    feed: parsed.feed ?? base.feed,
     cardProgress: parsed.cardProgress ?? base.cardProgress,
     deckSize: parsed.deckSize ?? base.deckSize,
     drillLogs: parsed.drillLogs ?? base.drillLogs,
     insights: parsed.insights ?? base.insights,
+    // v3 fields tolerate older payloads the same way.
+    trackProgress: parsed.trackProgress ?? base.trackProgress,
+    bookProgress: migrateBookProgress(parsed),
+    quizResults: parsed.quizResults ?? base.quizResults,
+    predictions: parsed.predictions ?? base.predictions,
+    watchlist: parsed.watchlist?.length ? parsed.watchlist : base.watchlist,
     seedVersion: base.seedVersion,
   } as AppState;
+}
+
+/**
+ * The Resource Library page was replaced by the Books shelf. Anything the user
+ * had entered there — their own PDF link, a progress percentage — is carried
+ * onto the matching book rather than dropped, for the handful of resource ids
+ * that were really books.
+ */
+const RESOURCE_TO_BOOK: Record<string, string> = {
+  hull: 'hull',
+  afml: 'afml',
+  'sutton-barto': 'sutton-barto',
+};
+
+function migrateBookProgress(parsed: Partial<AppState>): Record<string, BookProgress> {
+  const existing = parsed.bookProgress ?? {};
+  const out: Record<string, BookProgress> = { ...existing };
+
+  for (const resource of parsed.resources ?? []) {
+    const bookId = RESOURCE_TO_BOOK[resource.id];
+    // Never overwrite progress the user has already recorded on the shelf.
+    if (!bookId || out[bookId]) continue;
+    const pct = resource.progress ?? 0;
+    if (!resource.pdfLink && pct === 0) continue;
+    out[bookId] = {
+      status: pct >= 100 ? 'finished' : pct > 0 ? 'reading' : 'unread',
+      chaptersDone: [],
+      myLink: resource.pdfLink,
+    };
+  }
+  return out;
 }
 
 /**
@@ -187,6 +233,7 @@ interface Ctx {
   regenerateTasks: (date: string) => { notes: string[] };
   rescheduleDay: (date: string) => void;
   toggleTask: (id: string) => void;
+  skipTrackItems: (trackId: TrackId, itemIds: string[]) => void;
   addTask: (t: Task) => void;
   updateTask: (t: Task) => void;
   deleteTask: (id: string) => void;
@@ -199,13 +246,19 @@ interface Ctx {
   addFixedBlock: (b: FixedBlock) => void;
   updateFixedBlock: (b: FixedBlock) => void;
   removeFixedBlock: (id: string) => void;
-  // v2: inbox
-  addFeedItem: (f: FeedItem) => void;
-  setFeedStatus: (id: string, status: FeedItem['status']) => void;
-  removeFeedItem: (id: string) => void;
   // v2: drill
   setDeckSize: (n: number) => void;
-  reviewCard: (id: string, remembered: boolean) => void;
+  addPrediction: (p: Prediction) => void;
+  resolvePredictions: (resolved: Prediction[]) => void;
+  setWatchlist: (symbols: string[]) => void;
+  recordQuiz: (
+    moduleId: string,
+    result: { correct: number; total: number; ms: number; missedIds: string[]; concepts: string[] }
+  ) => void;
+  setBookProgress: (bookId: string, patch: Partial<BookProgress>) => void;
+  tickChapter: (bookId: string, chapter: number) => void;
+  adoptDeck: (seeds: FlashcardSeed[]) => void;
+  reviewCard: (id: string, grade: RecallGrade) => void;
   logDrill: (correct: number, total: number) => void;
   // v2: insights
   addInsight: (i: Insight) => void;
@@ -386,12 +439,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const toggleTask = (id: string) => {
-    patch({
-      tasks: state.tasks.map((t) =>
-        t.id === id ? { ...t, status: t.status === 'done' ? 'pending' : 'done' } : t
-      ),
-    });
+    const task = state.tasks.find((t) => t.id === id);
+    const nowDone = task?.status !== 'done';
+
+    const tasks = state.tasks.map((t) =>
+      t.id === id ? { ...t, status: (t.status === 'done' ? 'pending' : 'done') as TaskStatus } : t
+    );
+
+    // Ticking a catalogue-backed task advances that track's cursor, which is
+    // what makes tomorrow's task the *next* problem/function/chapter rather
+    // than the same one again. Un-ticking reverses it, so the cursor never
+    // runs ahead of work actually done.
+    if (task?.trackId && task.trackItemId) {
+      const itemIds = task.trackItemId.split(',').filter(Boolean);
+      const trackPatch = nowDone
+        ? completeItems(state, task.trackId, itemIds, task.date)
+        : uncompleteItems(state, task.trackId, itemIds);
+      patch({ tasks, ...trackPatch });
+      return;
+    }
+
+    patch({ tasks });
   };
+
+  /** Pass over catalogue items permanently — they will not be offered again. */
+  const skipTrackItems = (trackId: TrackId, itemIds: string[]) => patch(skipItems(state, trackId, itemIds));
 
   const addTask = (t: Task) => patch({ tasks: [...state.tasks, t] });
   const updateTask = (t: Task) => patch({ tasks: state.tasks.map((x) => (x.id === t.id ? t : x)) });
@@ -520,21 +592,139 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     patch({ fixedBlocks: blocks, tasks: rescheduleAll({ ...state, fixedBlocks: blocks }) });
   };
 
-  // ------------------------------------------------------------------ inbox
-
-  const addFeedItem = (f: FeedItem) => patch({ feed: [f, ...(state.feed ?? [])] });
-  const setFeedStatus = (id: string, status: FeedItem['status']) =>
-    patch({ feed: (state.feed ?? []).map((f) => (f.id === id ? { ...f, status } : f)) });
-  const removeFeedItem = (id: string) => patch({ feed: (state.feed ?? []).filter((f) => f.id !== id) });
-
   // ------------------------------------------------------------------ drill
 
   const setDeckSize = (n: number) => {
     if (state.deckSize !== n) patch({ deckSize: n });
   };
-  const reviewCard = (id: string, remembered: boolean) => {
+  /**
+   * Called once when the lazily-loaded deck arrives. Records its size and
+   * carries SRS progress across any re-clean of the deck.
+   *
+   * cardId() hashes the question text, so repairing a mangled question mints a
+   * new id and the old progress entry would be orphaned — the card would look
+   * unseen and its interval would reset to day one. Each seed records the ids
+   * it previously had; this remaps progress onto the current ones.
+   *
+   * hydrate() cannot do this: the deck is ~200KB and is imported on demand, so
+   * it does not exist yet at hydrate time.
+   */
+  const adoptDeck = (seeds: FlashcardSeed[]) => {
+    const map = legacyIdMap(seeds);
+    const progress = state.cardProgress ?? {};
+    const stale = Object.keys(progress).filter((id) => map[id]);
+
+    if (stale.length === 0) {
+      if (state.deckSize !== seeds.length) patch({ deckSize: seeds.length });
+      return;
+    }
+
+    const migrated: Record<string, CardProgress> = {};
+    for (const [id, value] of Object.entries(progress)) {
+      const current = map[id] ?? id;
+      const existing = migrated[current];
+      // If both the old and the new id carry progress, keep the more recent
+      // review rather than silently discarding one.
+      migrated[current] =
+        !existing || (value.lastReviewed ?? '') > (existing.lastReviewed ?? '') ? value : existing;
+    }
+    patch({ deckSize: seeds.length, cardProgress: migrated });
+  };
+
+  // ----------------------------------------------------------------- markets
+
+  const addPrediction = (p: Prediction) =>
+    patch({ predictions: [p, ...(state.predictions ?? [])] });
+
+  /** Writes back a batch of predictions the market page has just resolved. */
+  const resolvePredictions = (resolved: Prediction[]) => {
+    const byId = new Map(resolved.map((p) => [p.id, p]));
+    patch({ predictions: (state.predictions ?? []).map((p) => byId.get(p.id) ?? p) });
+  };
+
+  const setWatchlist = (symbols: string[]) => patch({ watchlist: symbols });
+
+  // ------------------------------------------------------------------- learn
+
+  /**
+   * Records a quiz attempt and re-queues what was missed.
+   *
+   * This is what makes Learn and Drill one system rather than two: a concept
+   * you just failed a quiz question on is scheduled for spaced review, instead
+   * of the failure being a number you scroll past.
+   */
+  const recordQuiz = (
+    moduleId: string,
+    result: { correct: number; total: number; ms: number; missedIds: string[]; concepts: string[] }
+  ) => {
+    const entry: QuizResult = {
+      id: uid('qz-'),
+      moduleId,
+      date: today(),
+      correct: result.correct,
+      total: result.total,
+      ms: result.ms,
+      missedIds: result.missedIds,
+    };
+
+    // Pull the matching concept cards back to the front of the review queue.
+    const concepts = result.concepts.map((c) => c.toLowerCase());
+    const knowledge = concepts.length === 0 ? state.knowledge : state.knowledge.map((k) =>
+      concepts.some((c) => k.concept.toLowerCase().includes(c) || c.includes(k.concept.toLowerCase()))
+        ? { ...k, srsStage: 0, nextReview: today() }
+        : k
+    );
+
+    patch({ quizResults: [entry, ...(state.quizResults ?? [])].slice(0, 500), knowledge });
+  };
+
+  // ------------------------------------------------------------------ books
+
+  const setBookProgress = (bookId: string, patchIn: Partial<BookProgress>) => {
+    const prev = state.bookProgress?.[bookId] ?? EMPTY_BOOK_PROGRESS;
+    patch({ bookProgress: { ...state.bookProgress, [bookId]: { ...prev, ...patchIn } } });
+  };
+
+  /**
+   * Ticking a chapter on the shelf and completing the planner's reading task
+   * are the same event, so both write to both places. Without this the shelf
+   * and the reading rotation drift apart within a week.
+   */
+  const tickChapter = (bookId: string, chapter: number) => {
+    const prev = state.bookProgress?.[bookId] ?? EMPTY_BOOK_PROGRESS;
+    const done = prev.chaptersDone.includes(chapter);
+    const chaptersDone = done
+      ? prev.chaptersDone.filter((n) => n !== chapter)
+      : [...prev.chaptersDone, chapter].sort((a, b) => a - b);
+
+    const total = chaptersOf(bookId).length;
+    const status: BookStatus =
+      total > 0 && chaptersDone.length >= total ? 'finished'
+      : chaptersDone.length > 0 ? 'reading'
+      : prev.status === 'finished' ? 'reading' : prev.status;
+
+    const book: BookProgress = {
+      ...prev,
+      chaptersDone,
+      status,
+      startedAt: prev.startedAt ?? (chaptersDone.length > 0 ? today() : undefined),
+      finishedAt: status === 'finished' ? (prev.finishedAt ?? today()) : undefined,
+    };
+
+    // Mirror onto the reading track so the planner offers the next chapter.
+    const unit = chaptersOf(bookId).find((u) => u.chapter === chapter);
+    const trackPatch = unit
+      ? done
+        ? uncompleteItems(state, 'reading', [unit.id])
+        : completeItems(state, 'reading', [unit.id], today())
+      : {};
+
+    patch({ bookProgress: { ...state.bookProgress, [bookId]: book }, ...trackPatch });
+  };
+
+  const reviewCard = (id: string, grade: RecallGrade) => {
     const prev: CardProgress | undefined = state.cardProgress?.[id];
-    patch({ cardProgress: { ...(state.cardProgress ?? {}), [id]: gradeCard(prev, remembered) } });
+    patch({ cardProgress: { ...(state.cardProgress ?? {}), [id]: gradeCard(prev, grade) } });
   };
   const logDrill = (correct: number, total: number) => {
     const d = today();
@@ -574,10 +764,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     () => ({
       state, patch, reset, importState, syncEnabled: isSupabaseConfigured, syncStatus,
       energyFor, setEnergy, ensureTasksForDate, regenerateTasks, rescheduleDay,
-      toggleTask, addTask, updateTask, deleteTask, rescheduleMissed, reviewKnowledge,
+      toggleTask, skipTrackItems, addTask, updateTask, deleteTask, rescheduleMissed, reviewKnowledge,
       updateSchedule, setCadence, syncCalendar, addFixedBlock, updateFixedBlock, removeFixedBlock,
-      addFeedItem, setFeedStatus, removeFeedItem,
-      setDeckSize, reviewCard, logDrill,
+      setDeckSize, addPrediction, resolvePredictions, setWatchlist, recordQuiz, setBookProgress, tickChapter, adoptDeck, reviewCard, logDrill,
       addInsight, updateInsight, removeInsight,
       addLesson, updateLesson, removeLesson,
     }),

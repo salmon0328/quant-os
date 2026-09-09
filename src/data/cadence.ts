@@ -5,6 +5,7 @@ export type TaskKindId =
   | 'markets'
   | 'build'
   | 'coding'
+  | 'theory'
   | 'deepInput'
   | 'drill'
   | 'terminal'
@@ -87,6 +88,20 @@ export const TASK_KINDS: TaskKind[] = [
     description: 'Two problems per session, pattern-first.',
   },
   {
+    id: 'theory',
+    label: 'Derivatives / theory reading',
+    pillar: 'finance',
+    category: 'finance',
+    // Mon/Wed/Fri, opposite the Tue/Thu coding days, so no weekday carries two
+    // long focused blocks.
+    defaultDays: [1, 3, 5],
+    minutes: 40,
+    priority: 'core',
+    rank: 3,
+    prefer: 'evening',
+    description: 'One chapter of Hull / Natenberg / Taleb, in order.',
+  },
+  {
     id: 'deepInput',
     label: 'Deep input',
     pillar: 'finance',
@@ -95,7 +110,7 @@ export const TASK_KINDS: TaskKind[] = [
     minutes: 30,
     weekendMinutes: 45,
     priority: 'optional',
-    rank: 3,
+    rank: 4,
     prefer: 'midday',
     description: 'Quartr earnings call, long podcast or long-form read.',
   },
@@ -108,7 +123,7 @@ export const TASK_KINDS: TaskKind[] = [
     minutes: 12,
     priority: 'optional',
     micro: true,
-    rank: 4,
+    rank: 5,
     prefer: 'morning',
     description: 'Short daily recall practice. Spaced repetition needs frequency.',
   },
@@ -121,7 +136,7 @@ export const TASK_KINDS: TaskKind[] = [
     minutes: 25,
     priority: 'optional',
     location: 'campus',
-    rank: 5,
+    rank: 6,
     prefer: 'midday',
     description: 'Only scheduled on days you are physically on campus.',
   },
@@ -134,7 +149,7 @@ export const TASK_KINDS: TaskKind[] = [
     minutes: 25,
     priority: 'core',
     admin: true,
-    rank: 6,
+    rank: 7,
     prefer: 'morning',
     description: 'Clear the inbox, set next week’s milestone, one career action.',
   },
@@ -147,7 +162,7 @@ export const TASK_KINDS: TaskKind[] = [
     minutes: 25,
     priority: 'core',
     admin: true,
-    rank: 7,
+    rank: 8,
     prefer: 'morning',
     description: 'Thirteen questions on the week that just happened.',
   },

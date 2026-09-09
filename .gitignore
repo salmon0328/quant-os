@@ -24,6 +24,10 @@ dist-ssr
 *.sw?
 .vercel
 .env*
+!.env.example
 
 # Personal study books (copyrighted PDFs — keep local only)
 *.pdf
+
+# Python bytecode from the content scripts
+__pycache__/

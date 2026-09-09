@@ -6,7 +6,7 @@ import { PILLARS } from '../data/pillars';
 import { endTimeOf } from '../engine/scheduler';
 
 export function TaskItem({ task, compact, showDate }: { task: Task; compact?: boolean; showDate?: boolean }) {
-  const { toggleTask, deleteTask, state } = useApp();
+  const { toggleTask, deleteTask, skipTrackItems, state } = useApp();
   const [open, setOpen] = useState(false);
   const done = task.status === 'done';
   const resource = task.resourceId ? state.resources.find((r) => r.id === task.resourceId) : undefined;
@@ -45,6 +45,23 @@ export function TaskItem({ task, compact, showDate }: { task: Task; compact?: bo
             </a>
           )}
 
+          {/* The specific problems/pages this task is asking for — never a homepage. */}
+          {task.links && task.links.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {task.links.map((l) => (
+                <a
+                  key={l.url}
+                  href={l.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="chip bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:text-indigo-300 dark:hover:bg-indigo-500/20"
+                >
+                  {l.label} ↗
+                </a>
+              ))}
+            </div>
+          )}
+
           <button onClick={() => setOpen(!open)} className="mt-1 text-xs text-slate-400 hover:underline">
             {open ? 'Hide details' : compact ? 'Why / output' : 'Why / output / resource'}
           </button>
@@ -52,14 +69,31 @@ export function TaskItem({ task, compact, showDate }: { task: Task; compact?: bo
             <div className="mt-2 space-y-1.5 rounded-md bg-slate-50 p-2 text-xs dark:bg-slate-800/60">
               <div><span className="font-semibold text-slate-500">Why: </span><span className="text-slate-600 dark:text-slate-300">{task.why}</span></div>
               <div><span className="font-semibold text-slate-500">Produce: </span><span className="text-slate-600 dark:text-slate-300">{task.output}</span></div>
+              {task.steps && task.steps.length > 0 && (
+                <div>
+                  <span className="font-semibold text-slate-500">Steps:</span>
+                  <ol className="mt-1 list-decimal space-y-1 pl-4 text-slate-600 dark:text-slate-300">
+                    {task.steps.map((step, i) => <li key={i}>{step}</li>)}
+                  </ol>
+                </div>
+              )}
               {task.resourceHint && <div><span className="font-semibold text-slate-500">Resource: </span>{task.resourceHint}</div>}
               {resource && (
                 <a href={resource.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-indigo-500 hover:underline">
                   ↗ {resource.title} {resource.access === 'paywalled' && <span className="text-amber-500">($)</span>}
                 </a>
               )}
-              <div className="pt-1">
+              <div className="flex gap-3 pt-1">
                 <button onClick={() => deleteTask(task.id)} className="text-red-400 hover:underline">Remove task</button>
+                {task.trackId && task.trackItemId && (
+                  <button
+                    onClick={() => skipTrackItems(task.trackId!, task.trackItemId!.split(','))}
+                    className="text-slate-400 hover:underline"
+                    title="Never offer this item again — it stays uncompleted."
+                  >
+                    Skip this item
+                  </button>
+                )}
               </div>
             </div>
           )}

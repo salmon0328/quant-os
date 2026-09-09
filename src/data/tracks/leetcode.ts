@@ -1,0 +1,210 @@
+/* eslint-disable */
+// The NeetCode 150, in roadmap order — patterns build on each other, so the
+// planner walks this list top to bottom rather than picking at random.
+//
+// `slug` is the real leetcode.com problem slug, which is the whole point: a
+// task can now link to the exact problem instead of a homepage.
+//
+// Hand-maintained. Add a problem by appending to its pattern block and
+// renumbering `order`; ids are derived from the slug and must stay stable,
+// because trackProgress.completedIds references them.
+
+export type LeetDifficulty = 'easy' | 'medium' | 'hard';
+
+export interface LeetProblem {
+  id: string;
+  title: string;
+  slug: string;
+  pattern: string;
+  difficulty: LeetDifficulty;
+  /** Position in the roadmap. */
+  order: number;
+  /** Needs a LeetCode Premium subscription — the planner skips these by default. */
+  premium?: boolean;
+  /** Turns up unusually often in quant / low-latency screens. */
+  quantRelevant?: boolean;
+}
+
+export const LEETCODE: LeetProblem[] = [
+  { id: "lc-contains-duplicate", title: "Contains Duplicate", slug: "contains-duplicate", pattern: "Arrays & Hashing", difficulty: "easy", order: 1, quantRelevant: true },
+  { id: "lc-valid-anagram", title: "Valid Anagram", slug: "valid-anagram", pattern: "Arrays & Hashing", difficulty: "easy", order: 2 },
+  { id: "lc-two-sum", title: "Two Sum", slug: "two-sum", pattern: "Arrays & Hashing", difficulty: "easy", order: 3, quantRelevant: true },
+  { id: "lc-group-anagrams", title: "Group Anagrams", slug: "group-anagrams", pattern: "Arrays & Hashing", difficulty: "medium", order: 4 },
+  { id: "lc-top-k-frequent-elements", title: "Top K Frequent Elements", slug: "top-k-frequent-elements", pattern: "Arrays & Hashing", difficulty: "medium", order: 5, quantRelevant: true },
+  { id: "lc-encode-and-decode-strings", title: "Encode and Decode Strings", slug: "encode-and-decode-strings", pattern: "Arrays & Hashing", difficulty: "medium", order: 6, premium: true },
+  { id: "lc-product-of-array-except-self", title: "Product of Array Except Self", slug: "product-of-array-except-self", pattern: "Arrays & Hashing", difficulty: "medium", order: 7, quantRelevant: true },
+  { id: "lc-valid-sudoku", title: "Valid Sudoku", slug: "valid-sudoku", pattern: "Arrays & Hashing", difficulty: "medium", order: 8 },
+  { id: "lc-longest-consecutive-sequence", title: "Longest Consecutive Sequence", slug: "longest-consecutive-sequence", pattern: "Arrays & Hashing", difficulty: "medium", order: 9 },
+  { id: "lc-valid-palindrome", title: "Valid Palindrome", slug: "valid-palindrome", pattern: "Two Pointers", difficulty: "easy", order: 10 },
+  { id: "lc-two-sum-ii-input-array-is-sorted", title: "Two Sum II Input Array Is Sorted", slug: "two-sum-ii-input-array-is-sorted", pattern: "Two Pointers", difficulty: "medium", order: 11 },
+  { id: "lc-3sum", title: "3Sum", slug: "3sum", pattern: "Two Pointers", difficulty: "medium", order: 12, quantRelevant: true },
+  { id: "lc-container-with-most-water", title: "Container With Most Water", slug: "container-with-most-water", pattern: "Two Pointers", difficulty: "medium", order: 13, quantRelevant: true },
+  { id: "lc-trapping-rain-water", title: "Trapping Rain Water", slug: "trapping-rain-water", pattern: "Two Pointers", difficulty: "hard", order: 14, quantRelevant: true },
+  { id: "lc-best-time-to-buy-and-sell-stock", title: "Best Time to Buy And Sell Stock", slug: "best-time-to-buy-and-sell-stock", pattern: "Sliding Window", difficulty: "easy", order: 15, quantRelevant: true },
+  { id: "lc-longest-substring-without-repeating-characters", title: "Longest Substring Without Repeating Characters", slug: "longest-substring-without-repeating-characters", pattern: "Sliding Window", difficulty: "medium", order: 16, quantRelevant: true },
+  { id: "lc-longest-repeating-character-replacement", title: "Longest Repeating Character Replacement", slug: "longest-repeating-character-replacement", pattern: "Sliding Window", difficulty: "medium", order: 17 },
+  { id: "lc-permutation-in-string", title: "Permutation In String", slug: "permutation-in-string", pattern: "Sliding Window", difficulty: "medium", order: 18 },
+  { id: "lc-minimum-window-substring", title: "Minimum Window Substring", slug: "minimum-window-substring", pattern: "Sliding Window", difficulty: "hard", order: 19 },
+  { id: "lc-sliding-window-maximum", title: "Sliding Window Maximum", slug: "sliding-window-maximum", pattern: "Sliding Window", difficulty: "hard", order: 20, quantRelevant: true },
+  { id: "lc-valid-parentheses", title: "Valid Parentheses", slug: "valid-parentheses", pattern: "Stack", difficulty: "easy", order: 21 },
+  { id: "lc-min-stack", title: "Min Stack", slug: "min-stack", pattern: "Stack", difficulty: "medium", order: 22, quantRelevant: true },
+  { id: "lc-evaluate-reverse-polish-notation", title: "Evaluate Reverse Polish Notation", slug: "evaluate-reverse-polish-notation", pattern: "Stack", difficulty: "medium", order: 23 },
+  { id: "lc-generate-parentheses", title: "Generate Parentheses", slug: "generate-parentheses", pattern: "Stack", difficulty: "medium", order: 24 },
+  { id: "lc-daily-temperatures", title: "Daily Temperatures", slug: "daily-temperatures", pattern: "Stack", difficulty: "medium", order: 25, quantRelevant: true },
+  { id: "lc-car-fleet", title: "Car Fleet", slug: "car-fleet", pattern: "Stack", difficulty: "medium", order: 26 },
+  { id: "lc-largest-rectangle-in-histogram", title: "Largest Rectangle In Histogram", slug: "largest-rectangle-in-histogram", pattern: "Stack", difficulty: "hard", order: 27 },
+  { id: "lc-binary-search", title: "Binary Search", slug: "binary-search", pattern: "Binary Search", difficulty: "easy", order: 28, quantRelevant: true },
+  { id: "lc-search-a-2d-matrix", title: "Search a 2D Matrix", slug: "search-a-2d-matrix", pattern: "Binary Search", difficulty: "medium", order: 29 },
+  { id: "lc-koko-eating-bananas", title: "Koko Eating Bananas", slug: "koko-eating-bananas", pattern: "Binary Search", difficulty: "medium", order: 30, quantRelevant: true },
+  { id: "lc-find-minimum-in-rotated-sorted-array", title: "Find Minimum In Rotated Sorted Array", slug: "find-minimum-in-rotated-sorted-array", pattern: "Binary Search", difficulty: "medium", order: 31 },
+  { id: "lc-search-in-rotated-sorted-array", title: "Search In Rotated Sorted Array", slug: "search-in-rotated-sorted-array", pattern: "Binary Search", difficulty: "medium", order: 32 },
+  { id: "lc-time-based-key-value-store", title: "Time Based Key Value Store", slug: "time-based-key-value-store", pattern: "Binary Search", difficulty: "medium", order: 33 },
+  { id: "lc-median-of-two-sorted-arrays", title: "Median of Two Sorted Arrays", slug: "median-of-two-sorted-arrays", pattern: "Binary Search", difficulty: "hard", order: 34, quantRelevant: true },
+  { id: "lc-reverse-linked-list", title: "Reverse Linked List", slug: "reverse-linked-list", pattern: "Linked List", difficulty: "easy", order: 35 },
+  { id: "lc-merge-two-sorted-lists", title: "Merge Two Sorted Lists", slug: "merge-two-sorted-lists", pattern: "Linked List", difficulty: "easy", order: 36 },
+  { id: "lc-reorder-list", title: "Reorder List", slug: "reorder-list", pattern: "Linked List", difficulty: "medium", order: 37 },
+  { id: "lc-remove-nth-node-from-end-of-list", title: "Remove Nth Node From End of List", slug: "remove-nth-node-from-end-of-list", pattern: "Linked List", difficulty: "medium", order: 38 },
+  { id: "lc-copy-list-with-random-pointer", title: "Copy List With Random Pointer", slug: "copy-list-with-random-pointer", pattern: "Linked List", difficulty: "medium", order: 39 },
+  { id: "lc-add-two-numbers", title: "Add Two Numbers", slug: "add-two-numbers", pattern: "Linked List", difficulty: "medium", order: 40 },
+  { id: "lc-linked-list-cycle", title: "Linked List Cycle", slug: "linked-list-cycle", pattern: "Linked List", difficulty: "easy", order: 41, quantRelevant: true },
+  { id: "lc-find-the-duplicate-number", title: "Find The Duplicate Number", slug: "find-the-duplicate-number", pattern: "Linked List", difficulty: "medium", order: 42, quantRelevant: true },
+  { id: "lc-lru-cache", title: "LRU Cache", slug: "lru-cache", pattern: "Linked List", difficulty: "medium", order: 43, quantRelevant: true },
+  { id: "lc-merge-k-sorted-lists", title: "Merge K Sorted Lists", slug: "merge-k-sorted-lists", pattern: "Linked List", difficulty: "hard", order: 44, quantRelevant: true },
+  { id: "lc-reverse-nodes-in-k-group", title: "Reverse Nodes In K Group", slug: "reverse-nodes-in-k-group", pattern: "Linked List", difficulty: "hard", order: 45 },
+  { id: "lc-invert-binary-tree", title: "Invert Binary Tree", slug: "invert-binary-tree", pattern: "Trees", difficulty: "easy", order: 46 },
+  { id: "lc-maximum-depth-of-binary-tree", title: "Maximum Depth of Binary Tree", slug: "maximum-depth-of-binary-tree", pattern: "Trees", difficulty: "easy", order: 47 },
+  { id: "lc-diameter-of-binary-tree", title: "Diameter of Binary Tree", slug: "diameter-of-binary-tree", pattern: "Trees", difficulty: "easy", order: 48 },
+  { id: "lc-balanced-binary-tree", title: "Balanced Binary Tree", slug: "balanced-binary-tree", pattern: "Trees", difficulty: "easy", order: 49 },
+  { id: "lc-same-tree", title: "Same Tree", slug: "same-tree", pattern: "Trees", difficulty: "easy", order: 50 },
+  { id: "lc-subtree-of-another-tree", title: "Subtree of Another Tree", slug: "subtree-of-another-tree", pattern: "Trees", difficulty: "easy", order: 51 },
+  { id: "lc-lowest-common-ancestor-of-a-binary-search-tree", title: "Lowest Common Ancestor of a Binary Search Tree", slug: "lowest-common-ancestor-of-a-binary-search-tree", pattern: "Trees", difficulty: "medium", order: 52 },
+  { id: "lc-binary-tree-level-order-traversal", title: "Binary Tree Level Order Traversal", slug: "binary-tree-level-order-traversal", pattern: "Trees", difficulty: "medium", order: 53 },
+  { id: "lc-binary-tree-right-side-view", title: "Binary Tree Right Side View", slug: "binary-tree-right-side-view", pattern: "Trees", difficulty: "medium", order: 54 },
+  { id: "lc-count-good-nodes-in-binary-tree", title: "Count Good Nodes In Binary Tree", slug: "count-good-nodes-in-binary-tree", pattern: "Trees", difficulty: "medium", order: 55 },
+  { id: "lc-validate-binary-search-tree", title: "Validate Binary Search Tree", slug: "validate-binary-search-tree", pattern: "Trees", difficulty: "medium", order: 56, quantRelevant: true },
+  { id: "lc-kth-smallest-element-in-a-bst", title: "Kth Smallest Element In a Bst", slug: "kth-smallest-element-in-a-bst", pattern: "Trees", difficulty: "medium", order: 57 },
+  { id: "lc-construct-binary-tree-from-preorder-and-inorder-traversal", title: "Construct Binary Tree From Preorder And Inorder Traversal", slug: "construct-binary-tree-from-preorder-and-inorder-traversal", pattern: "Trees", difficulty: "medium", order: 58 },
+  { id: "lc-binary-tree-maximum-path-sum", title: "Binary Tree Maximum Path Sum", slug: "binary-tree-maximum-path-sum", pattern: "Trees", difficulty: "hard", order: 59 },
+  { id: "lc-serialize-and-deserialize-binary-tree", title: "Serialize And Deserialize Binary Tree", slug: "serialize-and-deserialize-binary-tree", pattern: "Trees", difficulty: "hard", order: 60 },
+  { id: "lc-implement-trie-prefix-tree", title: "Implement Trie Prefix Tree", slug: "implement-trie-prefix-tree", pattern: "Tries", difficulty: "medium", order: 61 },
+  { id: "lc-design-add-and-search-words-data-structure", title: "Design Add And Search Words Data Structure", slug: "design-add-and-search-words-data-structure", pattern: "Tries", difficulty: "medium", order: 62 },
+  { id: "lc-word-search-ii", title: "Word Search II", slug: "word-search-ii", pattern: "Tries", difficulty: "hard", order: 63 },
+  { id: "lc-kth-largest-element-in-a-stream", title: "Kth Largest Element In a Stream", slug: "kth-largest-element-in-a-stream", pattern: "Heap / Priority Queue", difficulty: "easy", order: 64, quantRelevant: true },
+  { id: "lc-last-stone-weight", title: "Last Stone Weight", slug: "last-stone-weight", pattern: "Heap / Priority Queue", difficulty: "easy", order: 65 },
+  { id: "lc-k-closest-points-to-origin", title: "K Closest Points to Origin", slug: "k-closest-points-to-origin", pattern: "Heap / Priority Queue", difficulty: "medium", order: 66 },
+  { id: "lc-kth-largest-element-in-an-array", title: "Kth Largest Element In An Array", slug: "kth-largest-element-in-an-array", pattern: "Heap / Priority Queue", difficulty: "medium", order: 67, quantRelevant: true },
+  { id: "lc-task-scheduler", title: "Task Scheduler", slug: "task-scheduler", pattern: "Heap / Priority Queue", difficulty: "medium", order: 68 },
+  { id: "lc-design-twitter", title: "Design Twitter", slug: "design-twitter", pattern: "Heap / Priority Queue", difficulty: "medium", order: 69 },
+  { id: "lc-find-median-from-data-stream", title: "Find Median From Data Stream", slug: "find-median-from-data-stream", pattern: "Heap / Priority Queue", difficulty: "hard", order: 70, quantRelevant: true },
+  { id: "lc-subsets", title: "Subsets", slug: "subsets", pattern: "Backtracking", difficulty: "medium", order: 71 },
+  { id: "lc-combination-sum", title: "Combination Sum", slug: "combination-sum", pattern: "Backtracking", difficulty: "medium", order: 72 },
+  { id: "lc-permutations", title: "Permutations", slug: "permutations", pattern: "Backtracking", difficulty: "medium", order: 73 },
+  { id: "lc-subsets-ii", title: "Subsets II", slug: "subsets-ii", pattern: "Backtracking", difficulty: "medium", order: 74 },
+  { id: "lc-combination-sum-ii", title: "Combination Sum II", slug: "combination-sum-ii", pattern: "Backtracking", difficulty: "medium", order: 75 },
+  { id: "lc-word-search", title: "Word Search", slug: "word-search", pattern: "Backtracking", difficulty: "medium", order: 76 },
+  { id: "lc-palindrome-partitioning", title: "Palindrome Partitioning", slug: "palindrome-partitioning", pattern: "Backtracking", difficulty: "medium", order: 77 },
+  { id: "lc-letter-combinations-of-a-phone-number", title: "Letter Combinations of a Phone Number", slug: "letter-combinations-of-a-phone-number", pattern: "Backtracking", difficulty: "medium", order: 78 },
+  { id: "lc-n-queens", title: "N Queens", slug: "n-queens", pattern: "Backtracking", difficulty: "hard", order: 79 },
+  { id: "lc-number-of-islands", title: "Number of Islands", slug: "number-of-islands", pattern: "Graphs", difficulty: "medium", order: 80, quantRelevant: true },
+  { id: "lc-clone-graph", title: "Clone Graph", slug: "clone-graph", pattern: "Graphs", difficulty: "medium", order: 81 },
+  { id: "lc-max-area-of-island", title: "Max Area of Island", slug: "max-area-of-island", pattern: "Graphs", difficulty: "medium", order: 82 },
+  { id: "lc-pacific-atlantic-water-flow", title: "Pacific Atlantic Water Flow", slug: "pacific-atlantic-water-flow", pattern: "Graphs", difficulty: "medium", order: 83 },
+  { id: "lc-surrounded-regions", title: "Surrounded Regions", slug: "surrounded-regions", pattern: "Graphs", difficulty: "medium", order: 84 },
+  { id: "lc-rotting-oranges", title: "Rotting Oranges", slug: "rotting-oranges", pattern: "Graphs", difficulty: "medium", order: 85 },
+  { id: "lc-walls-and-gates", title: "Walls And Gates", slug: "walls-and-gates", pattern: "Graphs", difficulty: "medium", order: 86, premium: true },
+  { id: "lc-course-schedule", title: "Course Schedule", slug: "course-schedule", pattern: "Graphs", difficulty: "medium", order: 87, quantRelevant: true },
+  { id: "lc-course-schedule-ii", title: "Course Schedule II", slug: "course-schedule-ii", pattern: "Graphs", difficulty: "medium", order: 88 },
+  { id: "lc-redundant-connection", title: "Redundant Connection", slug: "redundant-connection", pattern: "Graphs", difficulty: "medium", order: 89 },
+  { id: "lc-number-of-connected-components-in-an-undirected-graph", title: "Number of Connected Components In An Undirected Graph", slug: "number-of-connected-components-in-an-undirected-graph", pattern: "Graphs", difficulty: "medium", order: 90, premium: true },
+  { id: "lc-graph-valid-tree", title: "Graph Valid Tree", slug: "graph-valid-tree", pattern: "Graphs", difficulty: "medium", order: 91, premium: true },
+  { id: "lc-word-ladder", title: "Word Ladder", slug: "word-ladder", pattern: "Graphs", difficulty: "hard", order: 92 },
+  { id: "lc-reconstruct-itinerary", title: "Reconstruct Itinerary", slug: "reconstruct-itinerary", pattern: "Advanced Graphs", difficulty: "hard", order: 93 },
+  { id: "lc-min-cost-to-connect-all-points", title: "Min Cost to Connect All Points", slug: "min-cost-to-connect-all-points", pattern: "Advanced Graphs", difficulty: "medium", order: 94 },
+  { id: "lc-network-delay-time", title: "Network Delay Time", slug: "network-delay-time", pattern: "Advanced Graphs", difficulty: "medium", order: 95, quantRelevant: true },
+  { id: "lc-swim-in-rising-water", title: "Swim In Rising Water", slug: "swim-in-rising-water", pattern: "Advanced Graphs", difficulty: "hard", order: 96 },
+  { id: "lc-alien-dictionary", title: "Alien Dictionary", slug: "alien-dictionary", pattern: "Advanced Graphs", difficulty: "hard", order: 97, premium: true },
+  { id: "lc-cheapest-flights-within-k-stops", title: "Cheapest Flights Within K Stops", slug: "cheapest-flights-within-k-stops", pattern: "Advanced Graphs", difficulty: "medium", order: 98, quantRelevant: true },
+  { id: "lc-climbing-stairs", title: "Climbing Stairs", slug: "climbing-stairs", pattern: "1-D Dynamic Programming", difficulty: "easy", order: 99, quantRelevant: true },
+  { id: "lc-min-cost-climbing-stairs", title: "Min Cost Climbing Stairs", slug: "min-cost-climbing-stairs", pattern: "1-D Dynamic Programming", difficulty: "easy", order: 100 },
+  { id: "lc-house-robber", title: "House Robber", slug: "house-robber", pattern: "1-D Dynamic Programming", difficulty: "medium", order: 101, quantRelevant: true },
+  { id: "lc-house-robber-ii", title: "House Robber II", slug: "house-robber-ii", pattern: "1-D Dynamic Programming", difficulty: "medium", order: 102 },
+  { id: "lc-longest-palindromic-substring", title: "Longest Palindromic Substring", slug: "longest-palindromic-substring", pattern: "1-D Dynamic Programming", difficulty: "medium", order: 103 },
+  { id: "lc-palindromic-substrings", title: "Palindromic Substrings", slug: "palindromic-substrings", pattern: "1-D Dynamic Programming", difficulty: "medium", order: 104 },
+  { id: "lc-decode-ways", title: "Decode Ways", slug: "decode-ways", pattern: "1-D Dynamic Programming", difficulty: "medium", order: 105 },
+  { id: "lc-coin-change", title: "Coin Change", slug: "coin-change", pattern: "1-D Dynamic Programming", difficulty: "medium", order: 106, quantRelevant: true },
+  { id: "lc-maximum-product-subarray", title: "Maximum Product Subarray", slug: "maximum-product-subarray", pattern: "1-D Dynamic Programming", difficulty: "medium", order: 107, quantRelevant: true },
+  { id: "lc-word-break", title: "Word Break", slug: "word-break", pattern: "1-D Dynamic Programming", difficulty: "medium", order: 108 },
+  { id: "lc-longest-increasing-subsequence", title: "Longest Increasing Subsequence", slug: "longest-increasing-subsequence", pattern: "1-D Dynamic Programming", difficulty: "medium", order: 109, quantRelevant: true },
+  { id: "lc-partition-equal-subset-sum", title: "Partition Equal Subset Sum", slug: "partition-equal-subset-sum", pattern: "1-D Dynamic Programming", difficulty: "medium", order: 110 },
+  { id: "lc-unique-paths", title: "Unique Paths", slug: "unique-paths", pattern: "2-D Dynamic Programming", difficulty: "medium", order: 111, quantRelevant: true },
+  { id: "lc-longest-common-subsequence", title: "Longest Common Subsequence", slug: "longest-common-subsequence", pattern: "2-D Dynamic Programming", difficulty: "medium", order: 112 },
+  { id: "lc-best-time-to-buy-and-sell-stock-with-cooldown", title: "Best Time to Buy And Sell Stock With Cooldown", slug: "best-time-to-buy-and-sell-stock-with-cooldown", pattern: "2-D Dynamic Programming", difficulty: "medium", order: 113, quantRelevant: true },
+  { id: "lc-coin-change-ii", title: "Coin Change II", slug: "coin-change-ii", pattern: "2-D Dynamic Programming", difficulty: "medium", order: 114 },
+  { id: "lc-target-sum", title: "Target Sum", slug: "target-sum", pattern: "2-D Dynamic Programming", difficulty: "medium", order: 115 },
+  { id: "lc-interleaving-string", title: "Interleaving String", slug: "interleaving-string", pattern: "2-D Dynamic Programming", difficulty: "medium", order: 116 },
+  { id: "lc-longest-increasing-path-in-a-matrix", title: "Longest Increasing Path In a Matrix", slug: "longest-increasing-path-in-a-matrix", pattern: "2-D Dynamic Programming", difficulty: "hard", order: 117 },
+  { id: "lc-distinct-subsequences", title: "Distinct Subsequences", slug: "distinct-subsequences", pattern: "2-D Dynamic Programming", difficulty: "hard", order: 118 },
+  { id: "lc-edit-distance", title: "Edit Distance", slug: "edit-distance", pattern: "2-D Dynamic Programming", difficulty: "medium", order: 119 },
+  { id: "lc-burst-balloons", title: "Burst Balloons", slug: "burst-balloons", pattern: "2-D Dynamic Programming", difficulty: "hard", order: 120 },
+  { id: "lc-regular-expression-matching", title: "Regular Expression Matching", slug: "regular-expression-matching", pattern: "2-D Dynamic Programming", difficulty: "hard", order: 121 },
+  { id: "lc-maximum-subarray", title: "Maximum Subarray", slug: "maximum-subarray", pattern: "Greedy", difficulty: "medium", order: 122, quantRelevant: true },
+  { id: "lc-jump-game", title: "Jump Game", slug: "jump-game", pattern: "Greedy", difficulty: "medium", order: 123 },
+  { id: "lc-jump-game-ii", title: "Jump Game II", slug: "jump-game-ii", pattern: "Greedy", difficulty: "medium", order: 124 },
+  { id: "lc-gas-station", title: "Gas Station", slug: "gas-station", pattern: "Greedy", difficulty: "medium", order: 125, quantRelevant: true },
+  { id: "lc-hand-of-straights", title: "Hand of Straights", slug: "hand-of-straights", pattern: "Greedy", difficulty: "medium", order: 126 },
+  { id: "lc-merge-triplets-to-form-target-triplet", title: "Merge Triplets to Form Target Triplet", slug: "merge-triplets-to-form-target-triplet", pattern: "Greedy", difficulty: "medium", order: 127 },
+  { id: "lc-partition-labels", title: "Partition Labels", slug: "partition-labels", pattern: "Greedy", difficulty: "medium", order: 128 },
+  { id: "lc-valid-parenthesis-string", title: "Valid Parenthesis String", slug: "valid-parenthesis-string", pattern: "Greedy", difficulty: "medium", order: 129 },
+  { id: "lc-insert-interval", title: "Insert Interval", slug: "insert-interval", pattern: "Intervals", difficulty: "medium", order: 130, quantRelevant: true },
+  { id: "lc-merge-intervals", title: "Merge Intervals", slug: "merge-intervals", pattern: "Intervals", difficulty: "medium", order: 131, quantRelevant: true },
+  { id: "lc-non-overlapping-intervals", title: "Non Overlapping Intervals", slug: "non-overlapping-intervals", pattern: "Intervals", difficulty: "medium", order: 132 },
+  { id: "lc-meeting-rooms", title: "Meeting Rooms", slug: "meeting-rooms", pattern: "Intervals", difficulty: "easy", order: 133, premium: true },
+  { id: "lc-meeting-rooms-ii", title: "Meeting Rooms II", slug: "meeting-rooms-ii", pattern: "Intervals", difficulty: "medium", order: 134, premium: true, quantRelevant: true },
+  { id: "lc-minimum-interval-to-include-each-query", title: "Minimum Interval to Include Each Query", slug: "minimum-interval-to-include-each-query", pattern: "Intervals", difficulty: "hard", order: 135 },
+  { id: "lc-rotate-image", title: "Rotate Image", slug: "rotate-image", pattern: "Math & Geometry", difficulty: "medium", order: 136 },
+  { id: "lc-spiral-matrix", title: "Spiral Matrix", slug: "spiral-matrix", pattern: "Math & Geometry", difficulty: "medium", order: 137 },
+  { id: "lc-set-matrix-zeroes", title: "Set Matrix Zeroes", slug: "set-matrix-zeroes", pattern: "Math & Geometry", difficulty: "medium", order: 138 },
+  { id: "lc-happy-number", title: "Happy Number", slug: "happy-number", pattern: "Math & Geometry", difficulty: "easy", order: 139 },
+  { id: "lc-plus-one", title: "Plus One", slug: "plus-one", pattern: "Math & Geometry", difficulty: "easy", order: 140 },
+  { id: "lc-powx-n", title: "Pow(x, n)", slug: "powx-n", pattern: "Math & Geometry", difficulty: "medium", order: 141, quantRelevant: true },
+  { id: "lc-multiply-strings", title: "Multiply Strings", slug: "multiply-strings", pattern: "Math & Geometry", difficulty: "medium", order: 142 },
+  { id: "lc-detect-squares", title: "Detect Squares", slug: "detect-squares", pattern: "Math & Geometry", difficulty: "medium", order: 143 },
+  { id: "lc-single-number", title: "Single Number", slug: "single-number", pattern: "Bit Manipulation", difficulty: "easy", order: 144, quantRelevant: true },
+  { id: "lc-number-of-1-bits", title: "Number of 1 Bits", slug: "number-of-1-bits", pattern: "Bit Manipulation", difficulty: "easy", order: 145, quantRelevant: true },
+  { id: "lc-counting-bits", title: "Counting Bits", slug: "counting-bits", pattern: "Bit Manipulation", difficulty: "easy", order: 146 },
+  { id: "lc-reverse-bits", title: "Reverse Bits", slug: "reverse-bits", pattern: "Bit Manipulation", difficulty: "easy", order: 147 },
+  { id: "lc-missing-number", title: "Missing Number", slug: "missing-number", pattern: "Bit Manipulation", difficulty: "easy", order: 148, quantRelevant: true },
+  { id: "lc-sum-of-two-integers", title: "Sum of Two Integers", slug: "sum-of-two-integers", pattern: "Bit Manipulation", difficulty: "medium", order: 149 },
+  { id: "lc-reverse-integer", title: "Reverse Integer", slug: "reverse-integer", pattern: "Bit Manipulation", difficulty: "medium", order: 150 },
+];
+
+/** The canonical problem page. */
+export function leetcodeUrl(p: LeetProblem): string {
+  return `https://leetcode.com/problems/${p.slug}/`;
+}
+
+/** NeetCode's walkthrough for the same problem (video + solutions). */
+export function neetcodeUrl(p: LeetProblem): string {
+  return `https://neetcode.io/problems/${p.slug}`;
+}
+
+export const LEETCODE_PATTERNS: string[] = [
+  "Arrays & Hashing",
+  "Two Pointers",
+  "Sliding Window",
+  "Stack",
+  "Binary Search",
+  "Linked List",
+  "Trees",
+  "Tries",
+  "Heap / Priority Queue",
+  "Backtracking",
+  "Graphs",
+  "Advanced Graphs",
+  "1-D Dynamic Programming",
+  "2-D Dynamic Programming",
+  "Greedy",
+  "Intervals",
+  "Math & Geometry",
+  "Bit Manipulation",
+];

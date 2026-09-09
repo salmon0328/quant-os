@@ -1,4 +1,4 @@
-import { HashRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppProvider } from './store/AppState';
 import { AuthProvider, useAuth } from './store/AuthState';
 import { Login } from './pages/Login';
@@ -10,12 +10,11 @@ import Markets from './pages/Markets';
 import Projects from './pages/Projects';
 import Research from './pages/Research';
 import Insights from './pages/Insights';
-import Inbox from './pages/Inbox';
 import Settings from './pages/Settings';
 import Career from './pages/Career';
-import Knowledge from './pages/Knowledge';
+import Drill from './pages/Drill';
 import Aptitude from './pages/Aptitude';
-import Resources from './pages/Resources';
+import Books from './pages/Books';
 import Reviews from './pages/Reviews';
 import Roadmap from './pages/Roadmap';
 
@@ -57,12 +56,18 @@ function Gate() {
             <Route path="/projects" element={<Projects />} />
             <Route path="/insights" element={<Insights />} />
             <Route path="/research" element={<Research />} />
-            <Route path="/inbox" element={<Inbox />} />
+            {/* Inbox removed in v3 — deep input now rotates a curated source list. */}
+            <Route path="/inbox" element={<Navigate to="/markets" replace />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/career" element={<Career />} />
-            <Route path="/knowledge" element={<Knowledge />} />
+            <Route path="/drill" element={<Drill />} />
+            {/* Renamed in v3 — keep old bookmarks working. */}
+            <Route path="/knowledge" element={<Navigate to="/drill" replace />} />
             <Route path="/aptitude" element={<Aptitude />} />
-            <Route path="/resources" element={<Resources />} />
+            {/* /oa was used briefly during the v3 work — keep it resolving. */}
+            <Route path="/oa" element={<Navigate to="/aptitude" replace />} />
+            <Route path="/books" element={<Books />} />
+            <Route path="/resources" element={<Navigate to="/books" replace />} />
             <Route path="/reviews" element={<Reviews />} />
             <Route path="/roadmap" element={<Roadmap />} />
           </Routes>

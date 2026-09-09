@@ -44,6 +44,17 @@ export interface Task {
   location?: TaskLocation; // campus-only tasks only land on days you're on campus
   /** Part of day this task suits best (markets read = morning, deep work = evening…). */
   prefer?: 'morning' | 'midday' | 'evening';
+  /**
+   * The catalogue item this task is asking for. Completing the task advances
+   * that track's cursor, which is what makes tomorrow's task the *next* item
+   * rather than the same generic prompt again.
+   */
+  trackId?: TrackId;
+  trackItemId?: string;
+  /** Concrete sub-steps shown inline (a Bloomberg function's "try this"). */
+  steps?: string[];
+  /** Extra links for the task — the specific problems, not a homepage. */
+  links?: { label: string; url: string }[];
 }
 
 /** Where the task can physically be done. */
@@ -180,6 +191,93 @@ export interface Lesson {
 }
 
 // ---------------------------------------------------------------------------
+// Learn: Subject -> Module -> activities
+//
+// The Learn page was a reader over six lessons. A module is the unit that
+// actually teaches something: the explanation, the vocabulary, a quiz that
+// checks it stuck, and an exercise you run.
+// ---------------------------------------------------------------------------
+
+export type SubjectId =
+  | 'probability'
+  | 'statistics'
+  | 'markets'
+  | 'derivatives'
+  | 'fixed-income'
+  | 'quant-methods'
+  | 'machine-learning'
+  | 'algorithms'
+  | 'programming'
+  | 'microstructure';
+
+export interface Subject {
+  id: SubjectId;
+  name: string;
+  blurb: string;
+  icon: string;
+  order: number;
+}
+
+export type QuizKind = 'mcq' | 'numeric' | 'free';
+
+export interface QuizQuestion {
+  id: string;
+  kind: QuizKind;
+  prompt: string;
+  /** mcq only. */
+  choices?: string[];
+  answerIndex?: number;
+  /** numeric: the expected value. free: the model answer to grade against. */
+  answer?: string;
+  /** numeric only — absolute tolerance, defaults to a relative 1%. */
+  tolerance?: number;
+  explanation: string;
+  /** Glossary term this checks, so a miss can be re-queued for review. */
+  concept?: string;
+}
+
+/** A runnable exercise. Tests are Python asserts executed in the browser. */
+export interface Exercise {
+  id: string;
+  title: string;
+  prompt: string;
+  starterCode: string;
+  solution: string;
+  /** Assertions appended to the user's code; passing means the exercise is done. */
+  tests: string;
+  hint?: string;
+}
+
+export interface ModuleBookRef {
+  bookId: string;
+  chapter: number;
+}
+
+export interface Module {
+  id: string;
+  subjectId: SubjectId;
+  title: string;
+  summary: string;
+  order: number;
+  difficulty: LessonDifficulty;
+  estMinutes: number;
+  tags: string[];
+  /** Module ids that should be done first. */
+  prereqs: string[];
+  /** Long-form teaching text — same renderer as the old Lesson.elaboration. */
+  elaboration: string;
+  keyNotes: string[];
+  glossary: { term: string; definition: string }[];
+  quiz: QuizQuestion[];
+  exercises: Exercise[];
+  /** Problems from the LeetCode catalogue that practise this module. */
+  leetcodeIds: string[];
+  bookRefs: ModuleBookRef[];
+  videos: VideoLink[];
+  sources: LessonSource[];
+}
+
+// ---------------------------------------------------------------------------
 // Aptitude Lab - the speed/pattern drills proprietary trading screens use
 // (the "80 questions in 8 minutes" style test, number series, reaction time)
 // ---------------------------------------------------------------------------
@@ -201,6 +299,7 @@ export type AptitudeKind =
   | 'gridrecall'   // spatial working memory with decoy cells
   | 'flanker'      // response inhibition: act on the centre, ignore the flanks
   | 'holdfire'     // go / no-go with a cue rule that keeps changing
+  | 'making'       // quote a two-sided market against a simulated counterparty
   | 'reaction'     // simple reaction time
   | 'wordle';      // pattern elimination
 
@@ -214,6 +313,13 @@ export interface AptitudeScore {
   /** Elapsed ms. For reaction this is the average reaction time - lower is better. */
   ms: number;
   date: string;
+  /**
+   * Per-question-type accuracy and speed, so the lab can say "your division is
+   * 40% slower than everything else" instead of only showing a total.
+   */
+  breakdown?: Record<string, { correct: number; total: number; ms: number }>;
+  /** Set when this run was part of a firm preset battery. */
+  preset?: string;
 }
 
 export interface MarketJournalEntry {
@@ -336,6 +442,108 @@ export interface CurriculumWeek {
   primaryPillar: PillarId;
 }
 
+// ---------------------------------------------------------------------------
+// Learning tracks: ordered catalogues of concrete items (a LeetCode problem, a
+// Bloomberg function, a book chapter) with a per-track cursor.
+//
+// Catalogue text lives in bundled modules under data/tracks; only the ids the
+// user has finished are persisted, following the same split as the flashcard
+// deck so the synced state stays small.
+// ---------------------------------------------------------------------------
+
+export type TrackId = 'leetcode' | 'bloomberg' | 'reading';
+
+/** Everything a track catalogue item must have for the planner to schedule it. */
+export interface TrackItem {
+  id: string;
+  title: string;
+  estMinutes?: number;
+  /** Ids that should be done first — the planner will not skip ahead past these. */
+  buildsOn?: string[];
+}
+
+export interface TrackCursor {
+  completedIds: string[];
+  /** Explicitly passed over — never offered again, but not counted as done. */
+  skippedIds: string[];
+  lastDoneDate?: string;
+}
+
+export const EMPTY_CURSOR: TrackCursor = { completedIds: [], skippedIds: [] };
+
+// ---------------------------------------------------------------------------
+// Books: the reading shelf, with per-chapter progress
+// ---------------------------------------------------------------------------
+
+export type BookStatus = 'unread' | 'reading' | 'finished' | 'abandoned';
+
+export interface BookProgress {
+  status: BookStatus;
+  /** Chapter numbers ticked off. */
+  chaptersDone: number[];
+  currentPage?: number;
+  startedAt?: string;
+  finishedAt?: string;
+  rating?: number; // 1-5, set on finish
+  /** The user's own copy — a Drive/library link they paste in. */
+  myLink?: string;
+  /** Google Play Books volume id, for the "Open in Play Books" deep link. */
+  playBooksVolumeId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Learn: quiz attempts
+// ---------------------------------------------------------------------------
+
+export interface QuizResult {
+  id: string;
+  moduleId: string;
+  date: string;
+  correct: number;
+  total: number;
+  ms: number;
+  /** Question ids answered wrongly, so their glossary cards can be re-queued. */
+  missedIds: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Markets: scored predictions
+//
+// The journal already asks for a prediction; nothing ever checked it. A
+// prediction carries a direction and a horizon so it can be resolved against
+// real prices and scored for calibration.
+// ---------------------------------------------------------------------------
+
+export type PredictionDirection = 'up' | 'down' | 'flat';
+
+export interface Prediction {
+  id: string;
+  date: string;
+  symbol: string;
+  direction: PredictionDirection;
+  horizonDays: number;
+  /** Resolve on this date using the prevailing price. */
+  resolveDate: string;
+  /** 0.5-1.0 — how sure, for the Brier score. */
+  confidence: number;
+  rationale: string;
+  /**
+   * Price when the call was made. Captured up front because the free data tier
+   * has no historical price endpoint — without this a prediction could never
+   * be scored after the fact.
+   */
+  startPrice: number;
+  /** Move below this counts as 'flat', in percent. */
+  flatBandPct: number;
+  /** Set once resolved. */
+  resolvedAt?: string;
+  endPrice?: number;
+  actualChangePct?: number;
+  correct?: boolean;
+  /** Links back to the journal entry this came from. */
+  journalEntryId?: string;
+}
+
 export interface AppState {
   profileName: string;
   startDate: string; // when the program started (drives week/month position)
@@ -361,7 +569,6 @@ export interface AppState {
   // --- v2: rhythm, inputs, drill, insights ---
   schedule: ScheduleSettings;
   fixedBlocks: FixedBlock[];
-  feed: FeedItem[];
   /** cardId -> progress. Card text comes from the bundled deck. */
   cardProgress: Record<string, CardProgress>;
   /** Cards loaded from the bundled deck (0 until the deck is opened once). */
@@ -370,6 +577,15 @@ export interface AppState {
   insights: Insight[];
   /** Bumped when seed data changes so new decks/links appear on upgrade. */
   seedVersion?: number;
+  // --- v3: concrete learning tracks, books, quizzes, scored predictions ---
+  /** Per-track cursor — which catalogue items are done. */
+  trackProgress: Record<string, TrackCursor>;
+  /** Per-book reading progress, keyed by book id. */
+  bookProgress: Record<string, BookProgress>;
+  quizResults: QuizResult[];
+  predictions: Prediction[];
+  /** Tickers on the markets tape. */
+  watchlist: string[];
 }
 
 export interface Deadline {
@@ -477,23 +693,12 @@ export interface FeedSource {
   note?: string;
 }
 
-export interface FeedItem {
-  id: string;
-  title: string;
-  type: FeedType;
-  url?: string;
-  source: string; // "Thoughts on the Market", "Quartr", "Doomberg"…
-  estMinutes: number;
-  pillar: PillarId;
-  status: 'inbox' | 'done' | 'archived';
-  addedAt: string;
-  notes?: string;
-  needsCampus?: boolean;
-}
-
 // ---------------------------------------------------------------------------
 // Flashcards (interview drill) & Insights (lightweight research capture)
 // ---------------------------------------------------------------------------
+
+/** Which kind of interview a card belongs to, so the deck can be drilled by target role. */
+export type CardRole = 'quant' | 'markets' | 'ib';
 
 export interface FlashcardSeed {
   deck: string;
@@ -507,6 +712,15 @@ export interface FlashcardSeed {
   page?: number;
   /** Result of the validation pass: whether the Q/A pair looks complete. */
   confidence?: 'high' | 'medium' | 'low';
+  role?: CardRole;
+  difficulty?: 'beginner' | 'intermediate' | 'advanced';
+  /**
+   * cardId() hashes the question text, so repairing a mangled question changes
+   * a card's id. These are the ids this card used to have, which lets
+   * hydrate() carry existing SRS progress across a re-clean instead of
+   * silently resetting it.
+   */
+  legacyIds?: string[];
 }
 
 export interface Flashcard {
@@ -523,18 +737,36 @@ export interface Flashcard {
   timesCorrect: number;
   page?: number;
   confidence?: 'high' | 'medium' | 'low';
+  role?: CardRole;
+  difficulty?: 'beginner' | 'intermediate' | 'advanced';
 }
+
+/**
+ * How well a card was recalled. Replaces the old binary remembered/forgot:
+ * "I got it but it took thirty seconds" and "instant" should not earn the same
+ * interval, and that distinction is most of what makes SRS work.
+ */
+export type RecallGrade = 'again' | 'hard' | 'good' | 'easy';
 
 /**
  * Only progress is persisted. Card text lives in the bundled seed module, so the
  * synced state stays small even with a few hundred cards.
  */
 export interface CardProgress {
+  /** Kept for continuity with pre-SM-2 saves; now derived from `interval`. */
   srsStage: number;
   nextReview: string;
   lastReviewed?: string;
   timesSeen: number;
   timesCorrect: number;
+  /** SM-2 ease factor. Absent on older saves — treat as 2.5. */
+  ease?: number;
+  /** Current interval in days. Absent on older saves — derive from srsStage. */
+  interval?: number;
+  /** Consecutive successful reviews; a lapse resets it. */
+  streak?: number;
+  /** How many times this card has been forgotten — surfaces your weak spots. */
+  lapses?: number;
 }
 
 export interface DrillLog {

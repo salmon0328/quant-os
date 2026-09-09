@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../store/AppState';
+import { trackSummaries } from '../engine/tracks';
 import { today, formatLong, addDays } from '../lib/date';
 import { blocksForDate, freeSlots, toMinutes } from '../engine/scheduler';
 import type { EnergyMode, Task } from '../models';
-import { Card, SectionTitle, EmptyState, Field } from '../components/ui';
+import { Card, SectionTitle, EmptyState, Field, ProgressBar } from '../components/ui';
 import { TaskItem } from '../components/TaskItem';
 import { uid } from '../lib/id';
 import { PILLARS } from '../data/pillars';
@@ -29,6 +30,7 @@ export default function Today() {
   const doneTasks = tasks.filter((t) => t.status === 'done');
   const totalMin = tasks.filter((t) => t.status !== 'done').reduce((a, t) => a + t.minutes, 0);
   const doneMin = doneTasks.reduce((a, t) => a + t.minutes, 0);
+  const tracks = trackSummaries(state);
   const pct = tasks.length ? Math.round((doneTasks.length / tasks.length) * 100) : 0;
 
   const yesterday = addDays(d, -1);
@@ -88,6 +90,27 @@ export default function Today() {
           <div className="text-[10px] text-slate-400">{Math.round((busyMinutes / 60) * 10) / 10}h committed</div>
         </Card>
       </div>
+
+      {/* Where each track stands — the point of the catalogues is that this moves. */}
+      <Card>
+        <div className="label mb-2">Track progress</div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {tracks.map((t) => (
+            <div key={t.trackId}>
+              <div className="flex items-baseline justify-between">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-200">{t.label}</span>
+                <span className="font-mono text-xs text-slate-400">{t.done}/{t.total}</span>
+              </div>
+              <ProgressBar value={(t.done / Math.max(1, t.total)) * 100} />
+              {t.nextLabel && (
+                <div className="mt-1 truncate text-[11px] text-slate-400" title={t.nextLabel}>
+                  Next: {t.nextLabel}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </Card>
 
       {/* Adaptive engine notes */}
       {notes.length > 0 && (
