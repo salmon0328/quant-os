@@ -26,8 +26,9 @@ const NAV: NavGroup[] = [
   {
     group: 'Learn',
     items: [
-      { to: '/learn', label: 'Learn', icon: '📚' },
+      { to: '/learn', label: 'Learn', icon: '📖' },
       { to: '/drill', label: 'Interview Drill', icon: '🧠' },
+      { to: '/books', label: 'Books', icon: '📚' },
       { to: '/aptitude', label: 'Aptitude', icon: '⚡' },
       { to: '/projects', label: 'Projects', icon: '🛠' },
     ],
@@ -50,7 +51,6 @@ const NAV: NavGroup[] = [
   {
     group: 'System',
     items: [
-      { to: '/resources', label: 'Resources', icon: '🔗' },
       { to: '/research', label: 'Deep dives', icon: '🔬' },
       { to: '/settings', label: 'Settings', icon: '⚙' },
     ],

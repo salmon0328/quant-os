@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useReducer, useRe
 import type {
   AppState, CardProgress, EnergyMode, FeedItem, FixedBlock, Insight,
   ScheduleSettings, Task, TaskStatus, TrackId, KnowledgeEntry, DayLog, Lesson, RecallGrade,
-  FlashcardSeed,
+  FlashcardSeed, BookProgress, BookStatus,
 } from '../models';
 import { DEFAULT_SCHEDULE } from '../models';
 import { PILLARS } from '../data/pillars';
@@ -13,6 +13,7 @@ import { LESSONS } from '../data/lessons';
 import { today, mondayOf, addDays } from '../lib/date';
 import { generateTasks, scheduleExisting } from '../engine/taskGenerator';
 import { completeItems, skipItems, uncompleteItems } from '../engine/tracks';
+import { chaptersOf, EMPTY_BOOK_PROGRESS } from '../data/books';
 import { scheduleNextReview, initReview } from '../engine/spacedRepetition';
 import { gradeCard, legacyIdMap } from '../data/flashcards';
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
@@ -125,11 +126,42 @@ function hydrate(parsed: Partial<AppState>): AppState {
     insights: parsed.insights ?? base.insights,
     // v3 fields tolerate older payloads the same way.
     trackProgress: parsed.trackProgress ?? base.trackProgress,
-    bookProgress: parsed.bookProgress ?? base.bookProgress,
+    bookProgress: migrateBookProgress(parsed),
     quizResults: parsed.quizResults ?? base.quizResults,
     predictions: parsed.predictions ?? base.predictions,
     seedVersion: base.seedVersion,
   } as AppState;
+}
+
+/**
+ * The Resource Library page was replaced by the Books shelf. Anything the user
+ * had entered there — their own PDF link, a progress percentage — is carried
+ * onto the matching book rather than dropped, for the handful of resource ids
+ * that were really books.
+ */
+const RESOURCE_TO_BOOK: Record<string, string> = {
+  hull: 'hull',
+  afml: 'afml',
+  'sutton-barto': 'sutton-barto',
+};
+
+function migrateBookProgress(parsed: Partial<AppState>): Record<string, BookProgress> {
+  const existing = parsed.bookProgress ?? {};
+  const out: Record<string, BookProgress> = { ...existing };
+
+  for (const resource of parsed.resources ?? []) {
+    const bookId = RESOURCE_TO_BOOK[resource.id];
+    // Never overwrite progress the user has already recorded on the shelf.
+    if (!bookId || out[bookId]) continue;
+    const pct = resource.progress ?? 0;
+    if (!resource.pdfLink && pct === 0) continue;
+    out[bookId] = {
+      status: pct >= 100 ? 'finished' : pct > 0 ? 'reading' : 'unread',
+      chaptersDone: [],
+      myLink: resource.pdfLink,
+    };
+  }
+  return out;
 }
 
 /**
@@ -218,6 +250,8 @@ interface Ctx {
   removeFeedItem: (id: string) => void;
   // v2: drill
   setDeckSize: (n: number) => void;
+  setBookProgress: (bookId: string, patch: Partial<BookProgress>) => void;
+  tickChapter: (bookId: string, chapter: number) => void;
   adoptDeck: (seeds: FlashcardSeed[]) => void;
   reviewCard: (id: string, grade: RecallGrade) => void;
   logDrill: (correct: number, total: number) => void;
@@ -599,6 +633,50 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     patch({ deckSize: seeds.length, cardProgress: migrated });
   };
 
+  // ------------------------------------------------------------------ books
+
+  const setBookProgress = (bookId: string, patchIn: Partial<BookProgress>) => {
+    const prev = state.bookProgress?.[bookId] ?? EMPTY_BOOK_PROGRESS;
+    patch({ bookProgress: { ...state.bookProgress, [bookId]: { ...prev, ...patchIn } } });
+  };
+
+  /**
+   * Ticking a chapter on the shelf and completing the planner's reading task
+   * are the same event, so both write to both places. Without this the shelf
+   * and the reading rotation drift apart within a week.
+   */
+  const tickChapter = (bookId: string, chapter: number) => {
+    const prev = state.bookProgress?.[bookId] ?? EMPTY_BOOK_PROGRESS;
+    const done = prev.chaptersDone.includes(chapter);
+    const chaptersDone = done
+      ? prev.chaptersDone.filter((n) => n !== chapter)
+      : [...prev.chaptersDone, chapter].sort((a, b) => a - b);
+
+    const total = chaptersOf(bookId).length;
+    const status: BookStatus =
+      total > 0 && chaptersDone.length >= total ? 'finished'
+      : chaptersDone.length > 0 ? 'reading'
+      : prev.status === 'finished' ? 'reading' : prev.status;
+
+    const book: BookProgress = {
+      ...prev,
+      chaptersDone,
+      status,
+      startedAt: prev.startedAt ?? (chaptersDone.length > 0 ? today() : undefined),
+      finishedAt: status === 'finished' ? (prev.finishedAt ?? today()) : undefined,
+    };
+
+    // Mirror onto the reading track so the planner offers the next chapter.
+    const unit = chaptersOf(bookId).find((u) => u.chapter === chapter);
+    const trackPatch = unit
+      ? done
+        ? uncompleteItems(state, 'reading', [unit.id])
+        : completeItems(state, 'reading', [unit.id], today())
+      : {};
+
+    patch({ bookProgress: { ...state.bookProgress, [bookId]: book }, ...trackPatch });
+  };
+
   const reviewCard = (id: string, grade: RecallGrade) => {
     const prev: CardProgress | undefined = state.cardProgress?.[id];
     patch({ cardProgress: { ...(state.cardProgress ?? {}), [id]: gradeCard(prev, grade) } });
@@ -644,7 +722,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       toggleTask, skipTrackItems, addTask, updateTask, deleteTask, rescheduleMissed, reviewKnowledge,
       updateSchedule, setCadence, syncCalendar, addFixedBlock, updateFixedBlock, removeFixedBlock,
       addFeedItem, setFeedStatus, removeFeedItem,
-      setDeckSize, adoptDeck, reviewCard, logDrill,
+      setDeckSize, setBookProgress, tickChapter, adoptDeck, reviewCard, logDrill,
       addInsight, updateInsight, removeInsight,
       addLesson, updateLesson, removeLesson,
     }),
