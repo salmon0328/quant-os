@@ -147,6 +147,10 @@ def main() -> int:
     usage = llm.Usage()
     print(f"{len(topics)} topic(s), model {model}\n")
 
+    # Long worked answers overflow the response budget when too many are asked
+    # for at once, which comes back as truncated JSON and loses the whole topic.
+    BATCH = 6
+
     for n, (topic, count, difficulty, cover) in enumerate(topics, 1):
         if topic in done:
             print(f"[{n}/{len(topics)}] skip (done) {topic}")
@@ -160,19 +164,31 @@ def main() -> int:
                 f"- {q}" for q in seen[-120:]
             )
 
-        try:
-            out = llm.chat(
-                system=SYSTEM,
-                user=USER.format(topic=topic, cover=cover, difficulty=difficulty, count=count, exclude=exclude),
-                model=model,
-                max_tokens=6000,
-                usage=usage,
-            )
-        except llm.LlmError as e:
-            print(f"[{n}/{len(topics)}] ! {topic}: {e}")
+        rows: list[dict] = []
+        failed = False
+        for start in range(0, count, BATCH):
+            batch = min(BATCH, count - start)
+            batch_exclude = exclude
+            if rows:
+                batch_exclude += "\n" + "\n".join(f"- {r.get('q','')}" for r in rows)
+            try:
+                out = llm.chat(
+                    system=SYSTEM,
+                    user=USER.format(topic=topic, cover=cover, difficulty=difficulty,
+                                     count=batch, exclude=batch_exclude),
+                    model=model,
+                    max_tokens=9000,
+                    usage=usage,
+                )
+            except llm.LlmError as e:
+                print(f"[{n}/{len(topics)}] ! {topic} (batch {start // BATCH + 1}): {e}")
+                failed = True
+                break
+            rows.extend((out.get("questions") or []) if isinstance(out, dict) else [])
+
+        if failed and not rows:
             continue
 
-        rows = out.get("questions") if isinstance(out, dict) else None
         if not rows:
             print(f"[{n}/{len(topics)}] ! {topic}: no questions returned")
             continue
@@ -193,8 +209,11 @@ def main() -> int:
                 "difficulty": r.get("difficulty", difficulty),
             })
 
-        done[topic] = cards
-        print(f"[{n}/{len(topics)}] {topic}: {len(cards)} card(s)")
+        if failed:
+            print(f"[{n}/{len(topics)}] {topic}: {len(cards)} card(s) (partial — will retry on re-run)")
+        else:
+            done[topic] = cards
+            print(f"[{n}/{len(topics)}] {topic}: {len(cards)} card(s)")
         if args.inspect:
             for c in cards[:3]:
                 print(f"      Q: {c['question']}")

@@ -250,6 +250,8 @@ def main() -> int:
     ap.add_argument("--only", default="", help="substring match on the deck name")
     ap.add_argument("--model", default=None, help="override $LLM_MODEL_SMART")
     ap.add_argument("--restart", action="store_true", help="discard the checkpoint")
+    ap.add_argument("--partial", action="store_true",
+                    help="write even though some cards were never processed (loses them)")
     args = ap.parse_args()
 
     if not llm.is_configured():
@@ -310,11 +312,31 @@ def main() -> int:
         print("\n--inspect: nothing written.")
         return 0
 
+    if args.sample or args.only:
+        print("\n--sample/--only is a partial run; not overwriting the deck. "
+              "The work is checkpointed -- re-run without those flags to finish and write.")
+        return 0
+
     # Preserve the original deck order for cards that survived.
     final = [done[fnv1a(c["question"])] for c in cards if fnv1a(c["question"]) in done]
+
+    # A card that was never processed is NOT the same as one deliberately
+    # dropped, and conflating the two is how a rate limit two thirds of the way
+    # through silently truncated the deck from 749 to 395. Only write when
+    # every card has been accounted for.
+    dropped_ids = {d["id"] for d in dropped}
+    unprocessed = [c for c in cards
+                   if fnv1a(c["question"]) not in done and fnv1a(c["question"]) not in dropped_ids]
+    if unprocessed and not args.partial:
+        print(f"\nRefusing to write: {len(unprocessed)} card(s) were never processed "
+              f"(cleaned {len(final)}, dropped {len(dropped)}, of {len(cards)}).")
+        print("Re-run to finish them -- the checkpoint resumes where this stopped. "
+              "Use --partial only if you genuinely intend to discard them.")
+        return 1
+
     if len(final) < len(cards) * 0.5:
-        print(f"\nRefusing to write: only {len(final)}/{len(cards)} cards survived. "
-              "Re-run to finish the batch, or investigate before overwriting the deck.")
+        print(f"\nRefusing to write: only {len(final)}/{len(cards)} cards survived cleaning. "
+              "Investigate before overwriting the deck.")
         return 1
 
     OUT_PATH.write_text(emit(final))

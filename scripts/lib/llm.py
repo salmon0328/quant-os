@@ -34,6 +34,27 @@ MAX_ATTEMPTS = 5
 # or nothing at all, which looks like a broken model rather than a budget.
 REASONING_HEADROOM = 1500
 
+# A 429 whose reset is further out than this is a real quota wall worth
+# aborting on; anything shorter is a rate-limit window to wait out.
+QUOTA_WALL_SECONDS = 900
+
+
+def _reset_seconds(detail: str) -> float | None:
+    """Pulls the reset delay out of a 429 body, in seconds.
+
+    Handles both 9Router's "(reset after 4s)" / "(reset after 159h 50m 50s)"
+    suffix and the upstream retryDelay field.
+    """
+    match = re.search(r"reset after\s+([0-9hms\s]+?)\)", detail)
+    if match:
+        total = 0.0
+        for value, unit in re.findall(r"(\d+(?:\.\d+)?)\s*([hms])", match.group(1)):
+            total += float(value) * {"h": 3600, "m": 60, "s": 1}[unit]
+        if total:
+            return total
+    match = re.search(r'"retryDelay"\s*:\s*"?([0-9.]+)s', detail)
+    return float(match.group(1)) if match else None
+
 
 class LlmError(RuntimeError):
     """Raised when a call fails in a way retrying will not fix."""
@@ -212,10 +233,16 @@ def chat(
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:300]
             last_error = f"HTTP {exc.code}: {detail}"
-            # A model whose quota is exhausted for days will not recover during
-            # a backoff loop -- fail fast so the operator can switch models.
+            # Distinguish a short rate-limit window from a real quota wall.
+            # 9Router reports both as 429 but includes the reset delay, and
+            # "reset after 4s" must be waited out, not treated as fatal --
+            # failing fast on those aborted a 749-card run two thirds through.
             if "quota" in detail.lower() or "RESOURCE_EXHAUSTED" in detail:
-                raise LlmError(f"model quota exhausted: {detail[:200]}") from exc
+                reset = _reset_seconds(detail)
+                if reset is None or reset > QUOTA_WALL_SECONDS:
+                    raise LlmError(f"model quota exhausted: {detail[:200]}") from exc
+                time.sleep(min(reset, 30) + 1 + random.random())
+                continue
             # 4xx other than rate limiting will not succeed on a retry.
             if exc.code != 429 and exc.code < 500:
                 raise LlmError(last_error) from exc
