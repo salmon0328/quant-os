@@ -1,29 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useApp } from '../store/AppState';
-import { Card, SectionTitle, EmptyState } from '../components/ui';
-import { EvRound, type Breakdown } from '../components/oa/EvRound';
-import { MarketMaking } from '../components/oa/MarketMaking';
-import { Zap } from '../components/oa/Zap';
-import { FIRM_PRESETS, type FirmPreset } from '../data/firmPresets';
-import type { AptitudeKind, AptitudeScore } from '../models';
-import { uid } from '../lib/id';
-import { today } from '../lib/date';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { Card } from '../../components/ui';
+import type { AptitudeScore } from '../../models';
 
-type Tab = AptitudeKind;
-
-const TABS: { key: Tab; label: string; blurb: string }[] = [
-  { key: 'blitz', label: '80 in 8', blurb: '80 arithmetic questions in 8 minutes — the Optiver-style screen.' },
-  { key: 'ev', label: 'Expected value', blurb: 'Probability and EV under a clock — the SIG and Jane Street round.' },
-  { key: 'making', label: 'Market making', blurb: 'Quote a two-sided market. You only trade when you are wrong.' },
-  { key: 'patterns', label: 'Patterns', blurb: 'Number series: find the rule, type the next term.' },
-  { key: 'zap', label: 'Zap', blurb: 'Timed grid — largest, smallest, closest. Search under pressure.' },
-  { key: 'reaction', label: 'Reaction', blurb: 'Click the instant the box turns green. Five trials, average ms.' },
-  { key: 'wordle', label: 'Warm-up', blurb: 'Wordle. Not an OA format — kept as a warm-up.' },
-];
-
-// ---------------------------------------------------------------------------
-// question generators
-// ---------------------------------------------------------------------------
+/** The hub supplies the drill kind, so games only report their numbers. */
+type Done = (score: number, total: number, ms: number) => void;
 
 function rint(a: number, b: number) {
   return a + Math.floor(Math.random() * (b - a + 1));
@@ -32,6 +12,12 @@ function rint(a: number, b: number) {
 function pick<T>(xs: T[]): T {
   return xs[Math.floor(Math.random() * xs.length)];
 }
+
+// ---------------------------------------------------------------------------
+// 80 in 8 - the Optiver screen
+// ---------------------------------------------------------------------------
+
+const BLITZ_TIME = 8 * 60 * 1000;
 
 /** One arithmetic question roughly in the difficulty band of the 80-in-8 test. */
 function blitzQuestion(): { text: string; answer: number } {
@@ -61,228 +47,7 @@ function blitzQuestion(): { text: string; answer: number } {
   return { text: `${a} × ${b} + ${c}`, answer: a * b + c };
 }
 
-type PatternQ = { seq: number[]; answer: number; hint: string };
-
-function patternQuestion(): PatternQ {
-  const kind = rint(0, 5);
-  if (kind === 0) {
-    const a = rint(2, 9), d = rint(2, 12), n = rint(4, 5);
-    const seq = Array.from({ length: n }, (_, i) => a + i * d);
-    return { seq, answer: a + n * d, hint: 'constant step' };
-  }
-  if (kind === 1) {
-    const a = rint(2, 5), r = pick([2, 3]), n = 4;
-    const seq = Array.from({ length: n }, (_, i) => a * Math.pow(r, i));
-    return { seq, answer: a * Math.pow(r, n), hint: 'multiply each term' };
-  }
-  if (kind === 2) {
-    const a = rint(1, 6), n = 5;
-    const seq = Array.from({ length: n }, (_, i) => (a + i) * (a + i));
-    return { seq, answer: (a + n) * (a + n), hint: 'squares' };
-  }
-  if (kind === 3) {
-    const a = rint(1, 5), b = rint(3, 9);
-    const seq = [a, b, a + b, a + 2 * b, 2 * a + 3 * b, 3 * a + 5 * b];
-    return { seq, answer: 5 * a + 8 * b, hint: 'each term is the sum of the previous two' };
-  }
-  if (kind === 4) {
-    // Two interleaved sequences.
-    const a = rint(2, 9), da = rint(2, 7), b = rint(20, 60), db = rint(2, 9);
-    const seq = [a, b, a + da, b + db, a + 2 * da, b + 2 * db, a + 3 * da];
-    return { seq, answer: b + 3 * db, hint: 'two sequences interleaved' };
-  }
-  const a = rint(2, 12), n = 5;
-  const seq = Array.from({ length: n }, (_, i) => a + i * (i + 1));
-  return { seq, answer: a + n * (n + 1), hint: 'the step itself increases' };
-}
-
-const WORDS = [
-  'PRICE', 'DEALT', 'SWAPS', 'ASSET', 'YIELD', 'SPREAD', 'OPTION', 'DELTA',
-  'RISKS', 'FUNDS', 'TREND', 'BONDS', 'CASHES', 'RATES', 'LIMIT', 'ORDER',
-  'TRACK', 'SHIFT', 'VALUE', 'GROSS', 'SMART', 'BLOCK', 'GRAIN', 'SHARP',
-  'PLAIN', 'ROUND', 'STAGE', 'TRUST', 'CLEAR', 'QUICK', 'BRAVE', 'FLAME',
-  'GLASS', 'HEART', 'LIGHT', 'MONEY', 'NIGHT', 'PEARL', 'RIVER', 'SOUND',
-  'TABLE', 'WATER', 'WHEEL', 'WORLD', 'YOUNG', 'ALERT', 'BLEND', 'CHASE',
-].filter((w) => w.length === 5);
-
-type Mark = 'absent' | 'present' | 'correct';
-
-function markGuess(guess: string, target: string): Mark[] {
-  const out: Mark[] = Array(5).fill('absent');
-  const pool: Record<string, number> = {};
-  for (let i = 0; i < 5; i++) {
-    if (guess[i] === target[i]) out[i] = 'correct';
-    else pool[target[i]] = (pool[target[i]] ?? 0) + 1;
-  }
-  for (let i = 0; i < 5; i++) {
-    if (out[i] === 'correct') continue;
-    const ch = guess[i];
-    if ((pool[ch] ?? 0) > 0) {
-      out[i] = 'present';
-      pool[ch] -= 1;
-    }
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-
-export default function OALab() {
-  const { state, patch } = useApp();
-  const [tab, setTab] = useState<Tab>('blitz');
-  const [preset, setPreset] = useState<FirmPreset | null>(null);
-  const [presetDone, setPresetDone] = useState(false);
-  const scores = (state.aptitudeScores ?? []) as AptitudeScore[];
-
-  const record = useCallback(
-    (kind: AptitudeKind, score: number, total: number, ms: number, breakdown?: Breakdown) => {
-      patch({
-        aptitudeScores: [
-          ...scores,
-          {
-            id: uid('apt-'), kind, score, total, ms, date: today(),
-            ...(breakdown ? { breakdown } : {}),
-            ...(preset ? { preset: preset.id } : {}),
-          },
-        ],
-      });
-      // Inside a firm battery, finishing one stage advances to the next.
-      if (preset) {
-        const at = preset.stages.findIndex((st) => st.kind === kind);
-        if (at >= 0 && at + 1 < preset.stages.length) setTab(preset.stages[at + 1].kind);
-        else if (at === preset.stages.length - 1) setPresetDone(true);
-      }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [patch, scores, preset]
-  );
-
-  const bestFor = (kind: AptitudeKind) => {
-    const rows = scores.filter((s) => s.kind === kind);
-    if (!rows.length) return null;
-    return kind === 'reaction'
-      ? rows.reduce((a, b) => (a.ms <= b.ms ? a : b))
-      : rows.reduce((a, b) => (a.score >= b.score ? a : b));
-  };
-
-  return (
-    <div className="space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">OA Lab</h1>
-        <p className="mt-1 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
-          The online assessments prop firms and hedge funds actually use — arithmetic under a clock,
-          expected value, quoting a two-sided market, and timed pattern search. Every run is logged,
-          so what you see is the trend rather than one lucky day.
-        </p>
-      </div>
-
-      <div className="flex flex-wrap gap-1.5">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`chip ${tab === t.key ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300'}`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'blitz' && <Blitz best={bestFor('blitz')} onDone={record} />}
-      {tab === 'patterns' && <Patterns best={bestFor('patterns')} onDone={record} />}
-      {tab === 'reaction' && <Reaction best={bestFor('reaction')} onDone={record} />}
-      {tab === 'wordle' && <Wordle best={bestFor('wordle')} onDone={record} />}
-      {tab === 'ev' && (
-        <EvRound
-          best={bestFor('ev')?.score ?? null}
-          onDone={(c, t, ms, bd) => record('ev', c, t, ms, bd)}
-        />
-      )}
-      {tab === 'making' && (
-        <MarketMaking
-          best={bestFor('making')?.score ?? null}
-          onDone={(pnl, rounds, ms) => record('making', pnl, rounds, ms)}
-        />
-      )}
-      {tab === 'zap' && (
-        <Zap best={bestFor('zap')?.score ?? null} onDone={(c, t, ms) => record('zap', c, t, ms)} />
-      )}
-
-      <Weakness scores={scores} />
-
-      <Card>
-        <SectionTitle>Firm presets</SectionTitle>
-        <p className="mb-3 text-xs text-slate-500">
-          Runs that firm's batteries back to back. Targets are indicative — what candidates commonly
-          report, not published pass marks.
-        </p>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {FIRM_PRESETS.map((f) => (
-            <div key={f.id} className={`rounded-xl border p-3 ${preset?.id === f.id ? 'border-indigo-400 bg-indigo-50/50 dark:bg-indigo-500/10' : 'border-slate-200 dark:border-slate-800'}`}>
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-slate-800 dark:text-slate-100">{f.firm}</span>
-                <button
-                  className="btn-ghost text-xs"
-                  onClick={() => { setPreset(f); setPresetDone(false); setTab(f.stages[0].kind); }}
-                >
-                  Run battery
-                </button>
-              </div>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{f.blurb}</p>
-              <ul className="mt-2 space-y-0.5 text-[11px] text-slate-400">
-                {f.stages.map((st) => (
-                  <li key={st.kind}>
-                    {TABS.find((t) => t.key === st.kind)?.label ?? st.kind} — {st.target}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-        {preset && (
-          <div className="mt-3 rounded-lg bg-indigo-50 p-2 text-xs dark:bg-indigo-500/10">
-            {presetDone
-              ? <>Battery complete — <b>{preset.firm}</b>. Scroll down for the runs, and compare against the targets above.</>
-              : <>Running the <b>{preset.firm}</b> battery. Finish each stage and the next one opens automatically.</>}
-            <button className="ml-2 underline" onClick={() => { setPreset(null); setPresetDone(false); }}>Exit</button>
-          </div>
-        )}
-      </Card>
-
-      <Card>
-        <SectionTitle>Recent runs</SectionTitle>
-        {scores.length === 0 ? (
-          <EmptyState>No runs logged yet — your scores and times will collect here.</EmptyState>
-        ) : (
-          <div className="max-h-56 space-y-1 overflow-y-auto text-sm">
-            {[...scores].reverse().slice(0, 25).map((s) => (
-              <div key={s.id} className="flex items-center justify-between border-b border-slate-100 py-1 dark:border-slate-800">
-                <span className="text-slate-500 dark:text-slate-400">{s.date} · {s.kind}</span>
-                <span className="font-medium text-slate-700 dark:text-slate-200">
-                  {s.kind === 'reaction'
-                    ? `${s.ms} ms avg`
-                    : s.kind === 'wordle'
-                      ? s.score === 1 ? `solved in ${s.total}` : `missed`
-                      : s.kind === 'making'
-                        ? `P&L ${s.score >= 0 ? '+' : ''}${s.score.toFixed(1)} over ${s.total} rounds`
-                        : `${s.score}/${s.total} in ${(s.ms / 1000).toFixed(0)}s`}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 80 in 8
-// ---------------------------------------------------------------------------
-
-const BLITZ_TIME = 8 * 60 * 1000;
-
-function Blitz({ best, onDone }: { best: AptitudeScore | null; onDone: (k: AptitudeKind, s: number, t: number, ms: number) => void }) {
+export function Blitz({ best, onDone }: { best: AptitudeScore | null; onDone: Done }) {
   const [running, setRunning] = useState(false);
   const [qs, setQs] = useState<{ text: string; answer: number }[]>([]);
   const [idx, setIdx] = useState(0);
@@ -313,7 +78,7 @@ function Blitz({ best, onDone }: { best: AptitudeScore | null; onDone: (k: Aptit
     setRunning(false);
     const ms = Date.now() - startedAt.current;
     setResult({ correct, attempted, ms });
-    onDone('blitz', correct, attempted, Math.min(ms, BLITZ_TIME));
+    onDone(correct, attempted, Math.min(ms, BLITZ_TIME));
   };
 
   const begin = () => {
@@ -352,6 +117,11 @@ function Blitz({ best, onDone }: { best: AptitudeScore | null; onDone: (k: Aptit
         <p className="mt-1 text-sm text-slate-500">
           {pct}% accuracy in {mmss(result.ms)} · {80 - result.attempted} unanswered
         </p>
+        {best && (
+          <p className="mt-2 text-xs text-slate-400">
+            Personal best: {best.score}/{best.total} in {mmss(best.ms)}
+          </p>
+        )}
         <button className="btn-primary mt-4" onClick={begin}>Run it again</button>
       </Card>
     );
@@ -402,10 +172,45 @@ function Blitz({ best, onDone }: { best: AptitudeScore | null; onDone: (k: Aptit
 }
 
 // ---------------------------------------------------------------------------
-// Patterns
+// Sequence trainer
 // ---------------------------------------------------------------------------
 
-function Patterns({ best, onDone }: { best: AptitudeScore | null; onDone: (k: AptitudeKind, s: number, t: number, ms: number) => void }) {
+type PatternQ = { seq: number[]; answer: number; hint: string };
+
+function patternQuestion(): PatternQ {
+  const kind = rint(0, 5);
+  if (kind === 0) {
+    const a = rint(2, 9), d = rint(2, 12), n = rint(4, 5);
+    const seq = Array.from({ length: n }, (_, i) => a + i * d);
+    return { seq, answer: a + n * d, hint: 'constant step' };
+  }
+  if (kind === 1) {
+    const a = rint(2, 5), r = pick([2, 3]), n = 4;
+    const seq = Array.from({ length: n }, (_, i) => a * Math.pow(r, i));
+    return { seq, answer: a * Math.pow(r, n), hint: 'multiply each term' };
+  }
+  if (kind === 2) {
+    const a = rint(1, 6), n = 5;
+    const seq = Array.from({ length: n }, (_, i) => (a + i) * (a + i));
+    return { seq, answer: (a + n) * (a + n), hint: 'squares' };
+  }
+  if (kind === 3) {
+    const a = rint(1, 5), b = rint(3, 9);
+    const seq = [a, b, a + b, a + 2 * b, 2 * a + 3 * b, 3 * a + 5 * b];
+    return { seq, answer: 5 * a + 8 * b, hint: 'each term is the sum of the previous two' };
+  }
+  if (kind === 4) {
+    // Two interleaved sequences.
+    const a = rint(2, 9), da = rint(2, 7), b = rint(20, 60), db = rint(2, 9);
+    const seq = [a, b, a + da, b + db, a + 2 * da, b + 2 * db, a + 3 * da];
+    return { seq, answer: b + 3 * db, hint: 'two sequences interleaved' };
+  }
+  const a = rint(2, 12), n = 5;
+  const seq = Array.from({ length: n }, (_, i) => a + i * (i + 1));
+  return { seq, answer: a + n * (n + 1), hint: 'the step itself increases' };
+}
+
+export function Patterns({ best, onDone }: { best: AptitudeScore | null; onDone: Done }) {
   const TOTAL = 12;
   const [qs, setQs] = useState<PatternQ[]>([]);
   const [idx, setIdx] = useState(0);
@@ -433,8 +238,9 @@ function Patterns({ best, onDone }: { best: AptitudeScore | null; onDone: (k: Ap
       setFeedback(null);
       if (idx + 1 >= qs.length) {
         const ms = Date.now() - startedAt.current;
-        setDone({ correct: correct + (ok ? 1 : 0), ms });
-        onDone('patterns', correct + (ok ? 1 : 0), TOTAL, ms);
+        const finalCorrect = correct + (ok ? 1 : 0);
+        setDone({ correct: finalCorrect, ms });
+        onDone(finalCorrect, TOTAL, ms);
         return;
       }
       setIdx((i) => i + 1);
@@ -496,10 +302,10 @@ function Patterns({ best, onDone }: { best: AptitudeScore | null; onDone: (k: Ap
 }
 
 // ---------------------------------------------------------------------------
-// Reaction
+// Reaction time
 // ---------------------------------------------------------------------------
 
-function Reaction({ best, onDone }: { best: AptitudeScore | null; onDone: (k: AptitudeKind, s: number, t: number, ms: number) => void }) {
+export function Reaction({ best, onDone }: { best: AptitudeScore | null; onDone: Done }) {
   const TRIALS = 5;
   const [phase, setPhase] = useState<'idle' | 'wait' | 'go' | 'result'>('idle');
   const [times, setTimes] = useState<number[]>([]);
@@ -538,7 +344,7 @@ function Reaction({ best, onDone }: { best: AptitudeScore | null; onDone: (k: Ap
         const avg = Math.round(next.reduce((a, b) => a + b, 0) / next.length);
         setPhase('result');
         setMsg(`Average ${avg} ms`);
-        onDone('reaction', 0, TRIALS, avg);
+        onDone(0, TRIALS, avg);
         return;
       }
       schedule();
@@ -581,7 +387,36 @@ function Reaction({ best, onDone }: { best: AptitudeScore | null; onDone: (k: Ap
 // Wordle
 // ---------------------------------------------------------------------------
 
-function Wordle({ best, onDone }: { best: AptitudeScore | null; onDone: (k: AptitudeKind, s: number, t: number, ms: number) => void }) {
+const WORDS = [
+  'PRICE', 'DEALT', 'SWAPS', 'ASSET', 'YIELD', 'OPTION', 'DELTA',
+  'RISKS', 'FUNDS', 'TREND', 'BONDS', 'RATES', 'LIMIT', 'ORDER',
+  'TRACK', 'SHIFT', 'VALUE', 'GROSS', 'SMART', 'BLOCK', 'GRAIN', 'SHARP',
+  'PLAIN', 'ROUND', 'STAGE', 'TRUST', 'CLEAR', 'QUICK', 'BRAVE', 'FLAME',
+  'GLASS', 'HEART', 'LIGHT', 'MONEY', 'NIGHT', 'PEARL', 'RIVER', 'SOUND',
+  'TABLE', 'WATER', 'WHEEL', 'WORLD', 'YOUNG', 'ALERT', 'BLEND', 'CHASE',
+].filter((w) => w.length === 5);
+
+type Mark = 'absent' | 'present' | 'correct';
+
+function markGuess(guess: string, target: string): Mark[] {
+  const out: Mark[] = Array(5).fill('absent');
+  const pool: Record<string, number> = {};
+  for (let i = 0; i < 5; i++) {
+    if (guess[i] === target[i]) out[i] = 'correct';
+    else pool[target[i]] = (pool[target[i]] ?? 0) + 1;
+  }
+  for (let i = 0; i < 5; i++) {
+    if (out[i] === 'correct') continue;
+    const ch = guess[i];
+    if ((pool[ch] ?? 0) > 0) {
+      out[i] = 'present';
+      pool[ch] -= 1;
+    }
+  }
+  return out;
+}
+
+export function Wordle({ best, onDone }: { best: AptitudeScore | null; onDone: Done }) {
   const [target, setTarget] = useState('');
   const [guesses, setGuesses] = useState<string[]>([]);
   const [typed, setTyped] = useState('');
@@ -603,10 +438,10 @@ function Wordle({ best, onDone }: { best: AptitudeScore | null; onDone: (k: Apti
     setTyped('');
     if (g === target) {
       setStatus('won');
-      onDone('wordle', 1, next.length, Date.now() - startedAt.current);
+      onDone(1, next.length, Date.now() - startedAt.current);
     } else if (next.length >= 6) {
       setStatus('lost');
-      onDone('wordle', 0, 6, Date.now() - startedAt.current);
+      onDone(0, 6, Date.now() - startedAt.current);
     }
   };
 
@@ -672,61 +507,6 @@ function Wordle({ best, onDone }: { best: AptitudeScore | null; onDone: (k: Apti
           <button className="btn-primary mt-3" onClick={begin}>New word</button>
         </div>
       )}
-    </Card>
-  );
-}
-
-/**
- * Weakness analytics.
- *
- * A total score tells you nothing you can act on. The EV round records which
- * category each question came from and how long it took, so this can say which
- * kind of question is actually costing you.
- */
-function Weakness({ scores }: { scores: AptitudeScore[] }) {
-  const agg: Record<string, { correct: number; total: number; ms: number }> = {};
-  for (const s of scores) {
-    for (const [cat, b] of Object.entries(s.breakdown ?? {})) {
-      const a = (agg[cat] ??= { correct: 0, total: 0, ms: 0 });
-      a.correct += b.correct;
-      a.total += b.total;
-      a.ms += b.ms;
-    }
-  }
-  const rows = Object.entries(agg).filter(([, a]) => a.total >= 3);
-  if (rows.length < 2) return null;
-
-  const avgSec = (a: { ms: number; total: number }) => a.ms / a.total / 1000;
-  const overallSec = rows.reduce((x, [, a]) => x + a.ms, 0) / rows.reduce((x, [, a]) => x + a.total, 0) / 1000;
-  const worst = rows.reduce((a, b) => (a[1].correct / a[1].total <= b[1].correct / b[1].total ? a : b));
-  const slowest = rows.reduce((a, b) => (avgSec(a[1]) >= avgSec(b[1]) ? a : b));
-
-  return (
-    <Card>
-      <SectionTitle>Where you are losing points</SectionTitle>
-      <div className="space-y-1.5">
-        {rows.sort((a, b) => a[1].correct / a[1].total - b[1].correct / b[1].total).map(([cat, a]) => {
-          const acc = a.correct / a.total;
-          return (
-            <div key={cat} className="flex items-center gap-2 text-xs">
-              <span className="w-32 capitalize text-slate-500">{cat}</span>
-              <div className="h-2 flex-1 overflow-hidden rounded bg-slate-200 dark:bg-slate-700">
-                <div className={`h-full ${acc >= 0.7 ? 'bg-emerald-500' : acc >= 0.4 ? 'bg-amber-500' : 'bg-red-500'}`}
-                     style={{ width: `${acc * 100}%` }} />
-              </div>
-              <span className="w-14 text-right text-slate-400">{Math.round(acc * 100)}%</span>
-              <span className="w-14 text-right text-slate-400">{avgSec(a).toFixed(1)}s</span>
-            </div>
-          );
-        })}
-      </div>
-      <p className="mt-3 text-xs text-slate-500">
-        Weakest is <b className="capitalize">{worst[0]}</b> at {Math.round((worst[1].correct / worst[1].total) * 100)}%.
-        {slowest[0] !== worst[0] && avgSec(slowest[1]) > overallSec * 1.3 && (
-          <> Slowest is <b className="capitalize">{slowest[0]}</b> at {avgSec(slowest[1]).toFixed(1)}s
-          against a {overallSec.toFixed(1)}s average — that is where the clock is going.</>
-        )}
-      </p>
     </Card>
   );
 }

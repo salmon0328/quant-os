@@ -282,15 +282,26 @@ export interface Module {
 // (the "80 questions in 8 minutes" style test, number series, reaction time)
 // ---------------------------------------------------------------------------
 
+/**
+ * Drill types modelled on the categories trading-firm prep sites (e.g. tradermath)
+ * group their assessments into: numerical speed, probability/estimation, and the
+ * cognitive tests firms actually put in front of candidates.
+ */
 export type AptitudeKind =
-  | 'blitz'      // 80 arithmetic questions in 8 minutes (Optiver-style)
-  | 'patterns'   // number series
-  | 'reaction'   // reaction time
-  | 'wordle'     // kept as a warm-up; not an OA format
-  | 'ev'         // expected value / probability under time
-  | 'making'     // two-sided market making against a simulated counterparty
-  | 'zap'        // timed grid, pattern recognition under pressure
-  | 'estimation';// Fermi estimation
+  | 'blitz'        // 80 arithmetic questions in 8 minutes (Optiver)
+  | 'patterns'     // number series, find the next term
+  | 'fractions'    // fraction -> decimal conversions, instant recall
+  | 'probability'  // timed probability / expected value
+  | 'fermi'        // order-of-magnitude estimation
+  | 'brainteaser'  // classic quant brainteasers, multiple choice
+  | 'taskswitch'   // Zap-N style: the rule flips, you must keep up
+  | 'pincode'      // digit span: forward / reverse / sorted
+  | 'gridrecall'   // spatial working memory with decoy cells
+  | 'flanker'      // response inhibition: act on the centre, ignore the flanks
+  | 'holdfire'     // go / no-go with a cue rule that keeps changing
+  | 'making'       // quote a two-sided market against a simulated counterparty
+  | 'reaction'     // simple reaction time
+  | 'wordle';      // pattern elimination
 
 export interface AptitudeScore {
   id: string;

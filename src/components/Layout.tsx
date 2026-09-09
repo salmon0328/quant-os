@@ -29,7 +29,7 @@ const NAV: NavGroup[] = [
     items: [
       { to: '/learn', label: 'Learn', icon: '📖' },
       { to: '/drill', label: 'Interview Drill', icon: '🧠' },
-      { to: '/oa', label: 'OA Lab', icon: '⚡' },
+      { to: '/aptitude', label: 'Aptitude Lab', icon: '⚡' },
       { to: '/books', label: 'Books', icon: '📚' },
     ],
   },
